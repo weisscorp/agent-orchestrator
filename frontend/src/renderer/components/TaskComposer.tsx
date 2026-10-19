@@ -149,7 +149,7 @@ export function TaskComposer({
 	const remoteConnections = useConnectedHosts();
 	const hostConnected = !hostId || remoteConnections.includes(hostId);
 	const [isPromptDirty, setIsPromptDirty] = useState(false);
-	const [repositorySelection, setRepositorySelection] = useState<{ context: string; names?: string[] }>(() => initialWorkspaceRepos === undefined ? undefined : { context: `${hostId ?? "local"}:${projectId ?? ""}`, names: [...initialWorkspaceRepos] });
+	const [repositorySelection, setRepositorySelection] = useState<{ context: string; names?: string[] } | undefined>(() => initialWorkspaceRepos === undefined ? undefined : { context: `${hostId ?? "local"}:${projectId ?? ""}`, names: [...initialWorkspaceRepos] });
 	const repositoryContext = `${hostId ?? "local"}:${projectId ?? ""}`;
 	const workspaceRepos = repositorySelection?.context === repositoryContext ? repositorySelection.names : undefined;
 	const [model, setModel] = useState("");
