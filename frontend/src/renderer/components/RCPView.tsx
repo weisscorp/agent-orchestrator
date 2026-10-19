@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { RefreshCw, Workflow } from 'lucide-react';
 import { apiClient, apiErrorMessage } from '../lib/api-client';
-import { loadRCPContext, prepareRCPPlanningBrief } from '../lib/rcp';
+import { loadRCPContext, prepareRCPPlanningBrief, rcpPlanningTargets } from '../lib/rcp';
 import { useWorkspaceQuery } from '../hooks/useWorkspaceQuery';
 import { TaskComposer } from './TaskComposer';
 import { Button } from './ui/button';
@@ -30,13 +30,22 @@ export function RCPView() {
  const scope=new Set(integration?.repositories?.length?integration.repositories:[...(feature?.repositories??[]),...(context.data?.integrations.flatMap(item=>item.repositories??[])??[])]);
  const repositories=[...new Map([...(catalog.data?.repositories??[]),...(context.data?.repositories??[])].map(repo=>[repo.id,repo])).values()].filter(repo=>scope.has(repo.id));
  const repository=repositories.find(repo=>repo.id===repositoryId);
- const project=workspaces.find(item=>item.kind!=='cloud'&&(item.name===repository?.name||item.name===repository?.name.split('/').at(-1)));
+ const targets=useQuery({queryKey:['rcp-project-targets',repository?.id,repository?.url,workspaces.map(item=>item.id).join(',')],enabled:!!repository,staleTime:0,retry:false,queryFn:async()=>{
+  const projects=await Promise.all(workspaces.filter(item=>item.kind!=='cloud'&&item.kind!=='standalone'&&!item.hostId).map(async item=>{
+   const {data,error}=await apiClient.GET('/api/v1/projects/{id}',{params:{path:{id:item.id}}});
+   if(error||!data||data.status!=='ok'||!('repo' in data.project))throw new Error('Не удалось проверить рабочие копии. Обнови список.');
+   return data.project;
+  }));
+  return repository?rcpPlanningTargets(projects,repository):[];
+ }});
+ const target=targets.data?.length===1?targets.data[0]:undefined;
+ const project=target?workspaces.find(item=>item.id===target.projectId):undefined;
  const visible=(catalog.data?.features??[]).filter(item=>`${item.title} ${item.product_id}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
- const error=catalog.error??context.error;
+ const error=catalog.error??context.error??targets.error;
  return <div className="flex min-h-0 flex-1 flex-col bg-background">
   <header className="workspace-topbar-container center-panel-titlebar flex h-toolbar shrink-0 items-center justify-between border-b border-border-strong px-4">
    <h1 className="flex items-center gap-2 font-medium"><Workflow aria-hidden="true" className="size-4"/>{t("rcp.features")}</h1>
-   <Button variant="ghost" disabled={catalog.isFetching||context.isFetching} onClick={()=>{void catalog.refetch();if(selected)void context.refetch();}}><RefreshCw aria-hidden="true" className="size-4"/>Обновить</Button>
+   <Button variant="ghost" disabled={catalog.isFetching||context.isFetching||targets.isFetching} onClick={()=>{void catalog.refetch();if(selected)void context.refetch();if(repository)void targets.refetch();}}><RefreshCw aria-hidden="true" className="size-4"/>Обновить</Button>
   </header>
   {error?<div role="alert" className="m-4 text-destructive">{error.message}</div>:null}
   <div className="grid min-h-0 flex-1 grid-cols-1 overflow-auto md:grid-cols-[minmax(16rem,1fr)_minmax(0,2fr)]">
@@ -61,7 +70,7 @@ export function RCPView() {
      <label className="block text-sm">Репозиторий<select className="my-2 block w-full rounded-md border border-input bg-background p-2" value={repositoryId} onChange={e=>{setRepositoryId(e.target.value);setCompose(false);}}><option value="">Выбрать репозиторий</option>{repositories.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
      {repository&&!project?<p role="status" className="mb-3 text-sm text-muted-foreground">{t("rcp.registerRepository", { name: repository.name })}</p>:null}
      <Button disabled={!integration||!project||!repositoryId||compose} onClick={()=>setCompose(true)}>Подготовить задачу</Button>
-     {compose&&project?<div className="mt-4"><TaskComposer key={`${selected}:${integrationId}:${repositoryId}`} projectId={project.id} initialPrompt="Составь план первого безопасного этапа. Только чтение исходников." createLabel="Начать анализ" prepareBrief={brief=>prepareRCPPlanningBrief(selected,integrationId,repositoryId,project.id,brief)} onCreated={sessionId=>void navigate({to:'/projects/$projectId/sessions/$sessionId',params:{projectId:project.id,sessionId}})}/></div>:null}
+     {compose&&project?<div className="mt-4"><TaskComposer key={`${selected}:${integrationId}:${repositoryId}`} projectId={project.id} initialWorkspaceRepos={target?.workspaceRepo?[target.workspaceRepo.name]:undefined} initialPrompt="Составь план первого безопасного этапа. Только чтение исходников." createLabel="Начать анализ" prepareBrief={(brief,workspaceRepos)=>prepareRCPPlanningBrief(selected,integrationId,repositoryId,project.id,brief,target,workspaceRepos)} onCreated={sessionId=>void navigate({to:'/projects/$projectId/sessions/$sessionId',params:{projectId:project.id,sessionId}})}/></div>:null}
     </>:null}
    </section>
   </div>

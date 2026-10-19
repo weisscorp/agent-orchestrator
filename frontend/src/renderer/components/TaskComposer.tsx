@@ -115,7 +115,8 @@ function hasErrorDetail(details: components["schemas"]["APIError"]["details"] | 
 
 export type TaskComposerProps = {
 	initialPrompt?: string;
-	prepareBrief?: (brief: string) => Promise<string>;
+	prepareBrief?: (brief: string, workspaceRepos?: string[]) => Promise<string>;
+	initialWorkspaceRepos?: string[];
 	projectId?: string;
 	hostId?: string;
 	onCreated: (sessionId: string) => void;
@@ -127,6 +128,7 @@ export type TaskComposerProps = {
 
 export function TaskComposer({
 	initialPrompt,
+	initialWorkspaceRepos,
 	prepareBrief,
 	projectId,
 	hostId,
@@ -147,7 +149,7 @@ export function TaskComposer({
 	const remoteConnections = useConnectedHosts();
 	const hostConnected = !hostId || remoteConnections.includes(hostId);
 	const [isPromptDirty, setIsPromptDirty] = useState(false);
-	const [repositorySelection, setRepositorySelection] = useState<{ context: string; names?: string[] }>();
+	const [repositorySelection, setRepositorySelection] = useState<{ context: string; names?: string[] }>(() => initialWorkspaceRepos === undefined ? undefined : { context: `${hostId ?? "local"}:${projectId ?? ""}`, names: [...initialWorkspaceRepos] });
 	const repositoryContext = `${hostId ?? "local"}:${projectId ?? ""}`;
 	const workspaceRepos = repositorySelection?.context === repositoryContext ? repositorySelection.names : undefined;
 	const [model, setModel] = useState("");
@@ -661,7 +663,7 @@ export function TaskComposer({
 		try {
 			if (prepareBrief) {
 				if (isCloudProject || approvalMode === "bypass-permissions") throw new Error("RCP planning requires a local task with approvals enabled.");
-				brief = await prepareBrief(brief);
+				brief = await prepareBrief(brief, workspaceRepos);
 			}
 			if (!isCloudProject && selectedAgent) {
 				try {

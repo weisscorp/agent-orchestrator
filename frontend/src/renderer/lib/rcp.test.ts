@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-vi.mock('./api-client',()=>({apiClient:{},apiErrorMessage:()=>''}));
-import { canonicalRCPRepository, rcpPlanningBrief, type RCPContext } from './rcp';
+vi.mock('./api-client',()=>({apiClient:{GET:vi.fn()},apiErrorMessage:()=>''}));
+import { apiClient } from './api-client';
+import type { components } from '../../api/schema';
+import { canonicalRCPRepository, prepareRCPPlanningBrief, rcpPlanningTargets, rcpPlanningBrief, type RCPContext } from './rcp';
 
 const context: RCPContext={
  feature:{id:'feature',product_id:'product',title:'Feature',status:'planned',goal:'Plan',problem:'',requirements:[],constraints:[],repositories:['back','front']},
@@ -24,5 +26,35 @@ describe('RCP task context',()=>{
   expect(canonicalRCPRepository('git@github.com:example-org/backend.git')).toBe(canonicalRCPRepository('https://github.com/example-org/backend'));
   expect(canonicalRCPRepository('https://github.com/other/backend')).not.toBe(canonicalRCPRepository('https://github.com/example-org/backend'));
   expect(canonicalRCPRepository('/tmp/backend')).toBeUndefined();
+ });
+});
+
+const repository: components['schemas']['RCPRepository']={id:'back',name:'example-org/api',url:'https://github.com/example-org/api.git'};
+const workspace: components['schemas']['Project']={id:'workspace',name:'github',kind:'workspace',repo:'',path:'/workspace',defaultBranch:'main',folderMissing:false,workspaceRepos:[{name:'api',relativePath:'services/api',repo:'git@github.com:example-org/api.git'},{name:'web',relativePath:'web',repo:'https://github.com/example-org/web'}]};
+describe('workspace RCP binding',()=>{
+ it('matches a child by name and origin, preserves standalone origins, and exposes ambiguity',()=>{
+  const target=rcpPlanningTargets([workspace],repository);
+  expect(target).toEqual([{projectId:'workspace',origin:'github.com/example-org/api',workspaceRepo:{name:'api',relativePath:'services/api'}}]);
+  expect(rcpPlanningTargets([{...workspace,workspaceRepos:[{name:'api',relativePath:'api',repo:'https://github.com/other/api'}]}],repository)).toEqual([]);
+  expect(rcpPlanningTargets([{...workspace,workspaceRepos:[{name:'other',relativePath:'api',repo:repository.url}]}],repository)).toEqual([]);
+  expect(rcpPlanningTargets([{...workspace,kind:'single_repo',repo:repository.url}],repository)).toEqual([{projectId:'workspace',origin:'github.com/example-org/api'}]);
+  expect(rcpPlanningTargets([workspace,{...workspace,id:'duplicate'}],repository)).toHaveLength(2);
+ });
+ it('revalidates fresh origin, path, selection and integration before preparing',async()=>{
+  const get=vi.mocked(apiClient.GET);
+  const fresh={...context,repositories:[repository]};
+  const target=rcpPlanningTargets([workspace],repository)[0];
+  const respond=(project=workspace,ctx=fresh)=>get.mockImplementation(async (path)=>path==='/api/v1/rcp/features/{featureId}'?{data:ctx,error:undefined,response:new Response()}:{data:{status:'ok',project},error:undefined,response:new Response()} as never);
+  respond();
+  const brief=await prepareRCPPlanningBrief('feature','integration','back','workspace','Inspect',target,['api']);
+  expect(brief).toContain("git -C 'services/api' remote get-url origin");
+  expect(brief).toContain('services/api');
+  for(const selection of [undefined,[],['web'],['api','web']])await expect(prepareRCPPlanningBrief('feature','integration','back','workspace','',target,selection)).rejects.toThrow();
+  respond({...workspace,workspaceRepos:[{...workspace.workspaceRepos![0],relativePath:'replacement'}]});
+  await expect(prepareRCPPlanningBrief('feature','integration','back','workspace','',target,['api'])).rejects.toThrow();
+  respond({...workspace,workspaceRepos:[{...workspace.workspaceRepos![0],repo:'https://github.com/other/api'}]});
+  await expect(prepareRCPPlanningBrief('feature','integration','back','workspace','',target,['api'])).rejects.toThrow();
+  respond(workspace,{...fresh,integrations:[{...fresh.integrations[0],status:'working'}]});
+  await expect(prepareRCPPlanningBrief('feature','integration','back','workspace','',target,['api'])).rejects.toThrow();
  });
 });

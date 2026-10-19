@@ -180,6 +180,7 @@ describe("TaskComposer", () => {
 		{ selection: "default", expected: undefined },
 		{ selection: "root", expected: [] },
 		{ selection: "subset", expected: ["api"] },
+		{ selection: "initial", expected: ["api"] },
 	])("sends workspace repository selection: $selection", async ({ selection, expected }) => {
 		h.agentCatalog = { agents: [agentReadiness("opencode", "OpenCode")] };
 		h.get.mockImplementation(async (path: string) => {
@@ -188,9 +189,10 @@ describe("TaskComposer", () => {
 			return { data: { status: "ok", project: { id: "workspace", kind: "workspace", workspaceRepos: [{ name: "api" }, { name: "web" }], config: { worker: { agent: "opencode" } } } } };
 		});
 		h.post.mockResolvedValue({ data: { workerId: "created" } });
-		render(<Wrap><TaskComposer projectId="workspace" onCreated={vi.fn()} /></Wrap>);
+		const prepareBrief = vi.fn(async (brief: string) => brief);
+		render(<Wrap><TaskComposer projectId="workspace" initialWorkspaceRepos={selection === "initial" ? ["api"] : undefined} prepareBrief={prepareBrief} onCreated={vi.fn()} /></Wrap>);
 		await waitForTaskReady();
-		if (selection !== "default") {
+		if (selection !== "default" && selection !== "initial") {
 			await userEvent.click(await screen.findByRole("button", { name: "Session repositories" }));
 			await userEvent.click(screen.getByRole("button", { name: "Workspace root only" }));
 			if (selection === "subset") await userEvent.click(screen.getByRole("checkbox", { name: "api" }));
@@ -202,6 +204,7 @@ describe("TaskComposer", () => {
 		const body = h.post.mock.calls.find(([path]) => path === "/api/v1/orchestrators/delegate")?.[1].body;
 		if (expected === undefined) expect(body).not.toHaveProperty("workspaceRepos");
 		else expect(body.workspaceRepos).toEqual(expected);
+		expect(prepareBrief).toHaveBeenCalledWith("Fix selected repositories", expected);
 		expect(h.post.mock.calls.some(([path]) => path === "/api/v1/projects/{id}/tasks/prepare")).toBe(false);
 	});
 
