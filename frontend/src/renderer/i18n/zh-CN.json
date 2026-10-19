@@ -1,4 +1,10 @@
 {
+	"rcp.features": "RCP 功能",
+	"rcp.loadingFeatures": "正在从 RCP 加载功能…",
+	"rcp.catalogTruncated": "显示前 200 项功能。完整列表可在 RCP 中查看。",
+	"rcp.emptyHistory": "暂无记录。分析结果保存到 RCP 后将显示在此处。",
+	"rcp.historyTruncated": "显示 {{count}} 条记录中的最新 20 条。完整历史记录保留在 RCP 中。",
+	"rcp.registerRepository": "请将 {{name}} 的现有工作副本添加到 AO 项目。",
 	"session.generatingBranchName": "正在生成分支名称",
 	"session.preparingBranch": "正在准备分支",
 	"session.initializingBranch": "正在初始化分支",

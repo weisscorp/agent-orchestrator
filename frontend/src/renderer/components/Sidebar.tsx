@@ -1022,7 +1022,7 @@ export function Sidebar({
 					</SidebarGroup>
 				) : null}
 				<SidebarMenu className="mb-3 gap-0.5 group-data-[collapsible=icon]:gap-1">
-					<SidebarMenuItem><SidebarTopNavRow active={selection.isRCP} icon={<FileText aria-hidden="true" />} label="Фичи RCP" onClick={selection.goRCP} tooltip={isCollapsed ? "Фичи RCP" : undefined} /></SidebarMenuItem>
+					<SidebarMenuItem><SidebarTopNavRow active={selection.isRCP} icon={<FileText aria-hidden="true" />} label={t("rcp.features")} onClick={selection.goRCP} tooltip={isCollapsed ? t("rcp.features") : undefined} /></SidebarMenuItem>
 					<SidebarMenuItem>
 						<SidebarTopNavRow
 							active={selection.isAutomations}

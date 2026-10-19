@@ -1,4 +1,10 @@
 {
+	"rcp.features": "RCP features",
+	"rcp.loadingFeatures": "Loading features from RCP…",
+	"rcp.catalogTruncated": "Showing the first 200 features. The complete list is available in RCP.",
+	"rcp.emptyHistory": "No records yet. Analysis results appear here after they are saved in RCP.",
+	"rcp.historyTruncated": "Last 20 of {{count}} records. The full history remains in RCP.",
+	"rcp.registerRepository": "Add an existing checkout of {{name}} to your AO projects.",
 	"session.generatingBranchName": "Generating branch name",
 	"session.preparingBranch": "Preparing branch",
 	"session.initializingBranch": "Initializing branch",

@@ -1,4 +1,10 @@
 {
+	"rcp.features": "Funciones de RCP",
+	"rcp.loadingFeatures": "Cargando funciones desde RCP…",
+	"rcp.catalogTruncated": "Se muestran las primeras 200 funciones. La lista completa está disponible en RCP.",
+	"rcp.emptyHistory": "Aún no hay registros. Los resultados del análisis aparecerán aquí después de guardarse en RCP.",
+	"rcp.historyTruncated": "Últimos 20 de {{count}} registros. El historial completo permanece en RCP.",
+	"rcp.registerRepository": "Añade una copia de trabajo existente de {{name}} a tus proyectos de AO.",
 	"session.generatingBranchName": "Generando nombre de rama",
 	"session.preparingBranch": "Preparando rama",
 	"session.initializingBranch": "Inicializando rama",

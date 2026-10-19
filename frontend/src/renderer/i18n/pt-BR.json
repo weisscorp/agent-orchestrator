@@ -1,4 +1,10 @@
 {
+	"rcp.features": "Recursos do RCP",
+	"rcp.loadingFeatures": "Carregando recursos do RCP…",
+	"rcp.catalogTruncated": "Exibindo os primeiros 200 recursos. A lista completa está disponível no RCP.",
+	"rcp.emptyHistory": "Ainda não há registros. Os resultados da análise aparecem aqui após serem salvos no RCP.",
+	"rcp.historyTruncated": "Últimos 20 de {{count}} registros. O histórico completo permanece no RCP.",
+	"rcp.registerRepository": "Adicione uma cópia de trabalho existente de {{name}} aos seus projetos do AO.",
 	"session.generatingBranchName": "Gerando nome da branch",
 	"session.preparingBranch": "Preparando branch",
 	"session.initializingBranch": "Inicializando branch",
