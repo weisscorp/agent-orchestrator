@@ -157,6 +157,12 @@ func schemaName(_ reflect.Type, defaultName string) string {
 // by projectOperations(). Add an entry when a new contract type is introduced;
 // the drift test fails until the spec is regenerated, which flags the gap.
 var schemaNames = map[string]string{ //nolint:gosec // Public OpenAPI type names include reset-credit contracts; no credential value is stored here.
+	"RcpCatalog":                                           "RCPFeaturesResponse",
+	"RcpContext":                                           "RCPContextResponse",
+	"RcpFeature":                                           "RCPFeature",
+	"RcpIntegration":                                       "RCPIntegration",
+	"RcpRepository":                                        "RCPRepository",
+	"RcpMemory":                                            "RCPMemory",
 	"ControllersAgentAccountIDParam":                       "AgentAccountIDParam",
 	"ControllersAgentAccountLoginIDParam":                  "AgentAccountLoginIDParam",
 	"ControllersAgentAccountSessionIDParam":                "AgentAccountSessionIDParam",
@@ -717,6 +723,7 @@ func operations() []operation {
 	ops = append(ops, reviewOperations()...)
 	ops = append(ops, notificationOperations()...)
 	ops = append(ops, reportOperations()...)
+	ops = append(ops, rcpOperations()...)
 	ops = append(ops, usageOperations()...)
 	ops = append(ops, pushOperations()...)
 	ops = append(ops, importOperations()...)
@@ -804,6 +811,20 @@ func identityOperations() []operation {
 			},
 		},
 	}
+}
+
+func rcpOperations() []operation {
+	return []operation{{
+		method: http.MethodGet, path: "/api/v1/rcp/features", id: "listRCPFeatures", tag: "projects",
+		summary:    "Read a bounded RCP feature catalog without starting work",
+		pathParams: []any{controllers.RCPFeaturesQuery{}},
+		resps:      []respUnit{{http.StatusOK, controllers.RCPFeaturesResponse{}}, {http.StatusBadGateway, envelope.APIError{}}, {http.StatusServiceUnavailable, envelope.APIError{}}},
+	}, {
+		method: http.MethodGet, path: "/api/v1/rcp/features/{featureId}", id: "resumeRCPFeature", tag: "projects",
+		summary:    "Read the selected RCP feature plan, repositories and recent history",
+		pathParams: []any{controllers.RCPFeatureParam{}},
+		resps:      []respUnit{{http.StatusOK, controllers.RCPContextResponse{}}, {http.StatusBadGateway, envelope.APIError{}}, {http.StatusServiceUnavailable, envelope.APIError{}}},
+	}}
 }
 
 func reportOperations() []operation {

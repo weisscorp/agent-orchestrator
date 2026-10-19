@@ -2025,7 +2025,7 @@ async function startDaemonInner(startEpoch: number): Promise<DaemonStatus> {
 
 	daemonOutput = "";
 	setDaemonStatus({ state: "starting" });
-	if (launch.source === "bundled") {
+	if (launch.source === "bundled" || (app.isPackaged && launch.source === "configured")) {
 		try {
 			await mkdir(launch.cwd, { recursive: true, mode: 0o750 });
 		} catch (err) {

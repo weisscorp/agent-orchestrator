@@ -95,6 +95,7 @@ vi.mock("../hooks/useCloudCp", () => ({
 }));
 
 import { TaskComposer } from "./TaskComposer";
+import { WorkspaceRepositoryPicker } from "./WorkspaceRepositoryPicker";
 import { agentReadiness } from "../test/agent-readiness-fixtures";
 import { agentReadinessQueryKey } from "../hooks/useAgentReadinessQuery";
 import { providerConnectionsQueryKey } from "../hooks/useProviderConnections";
@@ -153,6 +154,57 @@ afterEach(() => {
 });
 
 describe("TaskComposer", () => {
+	it("reports a lazy repository resolve error and recovers only after retry", async () => {
+		const onChange = vi.fn();
+		const onStart = vi.fn();
+		h.get.mockResolvedValueOnce({ data: { status: "error", project: { id: "workspace", resolveError: "Workspace path is unavailable" } } });
+		h.get.mockResolvedValueOnce({ data: { status: "ok", project: { id: "workspace", kind: "workspace", workspaceRepos: [{ name: "api" }] } } });
+		render(<Wrap><WorkspaceRepositoryPicker projectId="workspace" onChange={onChange} onStart={onStart} /></Wrap>);
+		expect(h.get).not.toHaveBeenCalled();
+		await userEvent.click(screen.getByRole("button", { name: "Session repositories" }));
+		expect(await screen.findByRole("alert")).toHaveTextContent("Project config is unavailable.");
+		expect(screen.queryByRole("checkbox", { name: "api" })).not.toBeInTheDocument();
+		expect(onChange).not.toHaveBeenCalled();
+		expect(onStart).not.toHaveBeenCalled();
+		expect(h.post).not.toHaveBeenCalled();
+		await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+		expect(await screen.findByRole("checkbox", { name: "api" })).toBeChecked();
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+		expect(h.get).toHaveBeenCalledTimes(2);
+		expect(onChange).not.toHaveBeenCalled();
+		expect(onStart).not.toHaveBeenCalled();
+		expect(h.post).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		{ selection: "default", expected: undefined },
+		{ selection: "root", expected: [] },
+		{ selection: "subset", expected: ["api"] },
+	])("sends workspace repository selection: $selection", async ({ selection, expected }) => {
+		h.agentCatalog = { agents: [agentReadiness("opencode", "OpenCode")] };
+		h.get.mockImplementation(async (path: string) => {
+			if (path.includes("/models")) return { data: { agent: "opencode", selectionMode: "text", models: [] } };
+			if (path === "/api/v1/settings") return { data: { defaultSessionMode: "chat", chatHarnesses: ["opencode"] } };
+			return { data: { status: "ok", project: { id: "workspace", kind: "workspace", workspaceRepos: [{ name: "api" }, { name: "web" }], config: { worker: { agent: "opencode" } } } } };
+		});
+		h.post.mockResolvedValue({ data: { workerId: "created" } });
+		render(<Wrap><TaskComposer projectId="workspace" onCreated={vi.fn()} /></Wrap>);
+		await waitForTaskReady();
+		if (selection !== "default") {
+			await userEvent.click(await screen.findByRole("button", { name: "Session repositories" }));
+			await userEvent.click(screen.getByRole("button", { name: "Workspace root only" }));
+			if (selection === "subset") await userEvent.click(screen.getByRole("checkbox", { name: "api" }));
+			await userEvent.keyboard("{Escape}");
+		}
+		fireEvent.change(task(), { target: { value: "Fix selected repositories" } });
+		fireEvent.click(startTask());
+		await waitFor(() => expect(h.post.mock.calls.some(([path]) => path === "/api/v1/orchestrators/delegate")).toBe(true));
+		const body = h.post.mock.calls.find(([path]) => path === "/api/v1/orchestrators/delegate")?.[1].body;
+		if (expected === undefined) expect(body).not.toHaveProperty("workspaceRepos");
+		else expect(body.workspaceRepos).toEqual(expected);
+		expect(h.post.mock.calls.some(([path]) => path === "/api/v1/projects/{id}/tasks/prepare")).toBe(false);
+	});
+
 	it("does not launch a remote project task without a ready agent", async () => {
 		h.agentCatalog = { agents: [] };
 		h.remoteGet.mockImplementation(async (path: string) => path === "/api/v1/settings"

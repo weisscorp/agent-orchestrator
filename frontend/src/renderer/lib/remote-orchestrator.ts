@@ -13,6 +13,7 @@ export function openRemoteOrchestrator(
 	mode?: "tui",
 	clean = false,
 	source: OrchestratorSpawnSource = "sidebar",
+	workspaceRepos?: string[],
 ): Promise<string> {
 	const key = `${refKey({ host: hostId, id: projectId })}:${clean ? "clean" : "ensure"}`;
 	const current = inFlight.get(key);
@@ -23,7 +24,7 @@ export function openRemoteOrchestrator(
 			await resumeOrchestrator(orchestrator.id, hostId);
 			return orchestrator.id;
 		}
-		return spawnOrchestrator(projectId, source, clean, mode, undefined, hostId);
+		return spawnOrchestrator(projectId, source, clean, mode, undefined, hostId, workspaceRepos);
 	})();
 	inFlight.set(key, request);
 	void request.finally(() => {

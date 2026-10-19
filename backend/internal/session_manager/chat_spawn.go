@@ -10,6 +10,7 @@ import (
 	"github.com/aoagents/agent-orchestrator/backend/internal/agentlaunch"
 	"github.com/aoagents/agent-orchestrator/backend/internal/domain"
 	"github.com/aoagents/agent-orchestrator/backend/internal/ports"
+	rcpsvc "github.com/aoagents/agent-orchestrator/backend/internal/service/rcp"
 )
 
 // The chat-mode controller launch.
@@ -367,9 +368,20 @@ func (m *Manager) aoMCPServers(harness domain.AgentHarness, env map[string]strin
 			serverEnv[key] = value
 		}
 	}
-	return []ports.ChatMCPServerConfig{{
+	servers := []ports.ChatMCPServerConfig{{
 		Name: "ao", Type: "stdio", Command: executable, Args: []string{"mcp"}, Env: serverEnv,
 	}}
+	// Codex thread/start replaces the top-level MCP map with these explicit
+	// servers. A CLI config override alone therefore cannot attach RCP.
+	// This pilot enables only the operator-configured local, credential-free
+	// endpoint; repository env cannot redirect it or inject credentials.
+	address := os.Getenv("AO_RCP_URL")
+	if address != "" && os.Getenv("AO_RCP_TOKEN") == "" {
+		if _, err := rcpsvc.New(address, ""); err == nil && address == "http://127.0.0.1:8090" {
+			servers = append(servers, ports.ChatMCPServerConfig{Name: "release_control", Type: "http", URL: address + "/mcp"})
+		}
+	}
+	return servers
 }
 
 func (m *Manager) stopChatAfterSpawnFailure(ctx context.Context, id domain.SessionID) {

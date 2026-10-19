@@ -271,7 +271,7 @@ func (f *fakeSessionService) Spawn(_ context.Context, cfg ports.SpawnConfig) (do
 	return s, len(cfg.Prompt), 0, nil
 }
 
-func (f *fakeSessionService) SpawnOrchestrator(ctx context.Context, projectID domain.ProjectID, clean bool, requestedMode domain.SessionMode, approval domain.PermissionMode) (domain.Session, error) {
+func (f *fakeSessionService) SpawnOrchestrator(ctx context.Context, projectID domain.ProjectID, clean bool, requestedMode domain.SessionMode, approval domain.PermissionMode, workspaceRepos ...[]string) (domain.Session, error) {
 	f.orchestratorMode = requestedMode
 	f.orchestratorApproval = approval
 	if clean {
@@ -4514,6 +4514,27 @@ func TestSessionsAPI_DelegateClientRequestHashIgnoresPreparationButBindsTask(t *
 			firstHash = hash
 		} else if (i == 1) != (hash == firstHash) {
 			t.Fatalf("request %d hash = %q, first = %q", i, hash, firstHash)
+		}
+	}
+}
+
+func TestSessionsAPI_DelegateWorkspaceScopeBindsRequestFingerprint(t *testing.T) {
+	svc := newFakeSessionService()
+	srv := newSessionTestServer(t, svc)
+	seen := map[string]bool{}
+	for _, selection := range []string{"", `,"workspaceRepos":[]`, `,"workspaceRepos":["api"]`} {
+		payload := `{"projectId":"ao","brief":"Fix it","clientRequestId":"scoped"` + selection + `}`
+		_, status, _ := doRequest(t, srv, http.MethodPost, "/api/v1/orchestrators/delegate", payload)
+		if status != http.StatusAccepted {
+			t.Fatalf("status=%d", status)
+		}
+		hash := svc.delegationInput.ClientRequestHash
+		if seen[hash] {
+			t.Fatal("omitted, [] and selected repositories share a request fingerprint")
+		}
+		seen[hash] = true
+		if selection != "" && svc.delegationInput.WorkspaceRepos == nil {
+			t.Fatal("explicit selection collapsed to omitted")
 		}
 	}
 }

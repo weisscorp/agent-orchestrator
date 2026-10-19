@@ -1,5 +1,6 @@
-import { type CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
+import { WorkspaceRepositoryPicker } from "./WorkspaceRepositoryPicker";
 import { Plus } from "lucide-react";
 import type { ProjectOrchestratorAction } from "../hooks/useProjectOrchestratorAction";
 import { getAgentActivityView } from "../lib/session-presentation";
@@ -8,14 +9,24 @@ import { OrchestratorActivityIndicator } from "./OrchestratorActivityIndicator";
 import { OrchestratorIcon } from "./icons";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./ui/tooltip";
 
-export function ProjectBoardActions({ actions, placement, quiet = false, cloud = false, style }: {
+export function ProjectBoardActions({ actions, placement, quiet = false, cloud = false, style, project, hostId }: {
 	actions: ProjectOrchestratorAction;
 	placement: "header" | "empty";
 	quiet?: boolean;
 	cloud?: boolean;
 	style?: CSSProperties;
+	project?: { kind?: string; workspaceRepos?: { name: string }[] };
+	hostId?: string;
 }) {
 	const { t } = useTranslation();
+	const context = `${hostId ?? "local"}:${actions.projectId ?? ""}`;
+	const [selection, setSelection] = useState<{ context: string; names?: string[] }>();
+	const workspaceRepos = project?.kind === "workspace"
+		? selection?.context === context ? selection.names : actions.lastWorkspaceRepos
+		: undefined;
+	const repositoryPicker = !actions.orchestrator && project?.kind === "workspace" ? <WorkspaceRepositoryPicker
+		projectId={actions.projectId} hostId={hostId} repositories={project.workspaceRepos} value={workspaceRepos} disabled={actions.isSpawning || actions.isProvisioning || actions.isProjectRestarting}
+		onChange={(names) => setSelection({ context, names })} /> : null;
 	const { orchestrator, isSpawning, isProjectRestarting, isProvisioning, spawnError, canCreateAsTui,
 		openNewTask, openOrchestrator } = actions;
 	const header = placement === "header";
@@ -34,7 +45,7 @@ export function ProjectBoardActions({ actions, placement, quiet = false, cloud =
 						className={header ? "topbar-control--labeled" : undefined}
 						data-priority={header ? "secondary" : undefined}
 						disabled={busy}
-						onClick={() => openOrchestrator()}
+						onClick={() => openOrchestrator(undefined, workspaceRepos)}
 						variant={quiet ? "secondary" : "primary"}
 					>
 						<OrchestratorIcon className="size-icon-md" aria-hidden="true" />
@@ -71,11 +82,11 @@ export function ProjectBoardActions({ actions, placement, quiet = false, cloud =
 			<TopbarActionError role={header ? "alert" : "status"} className={header ? "max-w-content-max truncate" : "text-caption leading-body"} title={spawnError}>
 				{spawnError}
 			</TopbarActionError>
-			{canCreateAsTui ? <TopbarButton disabled={busy} onClick={() => openOrchestrator("tui")} style={style}>{t("newTask.createAsTui")}</TopbarButton> : null}
+			{canCreateAsTui ? <TopbarButton disabled={busy} onClick={() => openOrchestrator("tui", workspaceRepos)} style={style}>{t("newTask.createAsTui")}</TopbarButton> : null}
 		</div>
 	) : null;
-	return header ? <>{feedback}{newTaskButton}{orchestratorButton}</> : <>
-		<div className="mt-5 flex items-center gap-2">{orchestratorButton}{newTaskButton}</div>
+	return header ? <>{feedback}{newTaskButton}{repositoryPicker}{orchestratorButton}</> : <>
+		<div className="mt-5 flex items-center gap-2">{repositoryPicker}{orchestratorButton}{newTaskButton}</div>
 		{feedback}
 	</>;
 }

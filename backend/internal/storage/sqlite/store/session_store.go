@@ -901,6 +901,7 @@ func mapListAllSessionsRows(rows []gen.ListAllSessionsRow) []domain.SessionRecor
 }
 
 func rowToRecord(row gen.GetSessionRow) domain.SessionRecord {
+	scope, scopeVersion := decodeWorkspaceScope(row.WorkspaceScope)
 	return domain.SessionRecord{
 		Revision:                  row.Revision,
 		ID:                        row.ID,
@@ -933,6 +934,7 @@ func rowToRecord(row gen.GetSessionRow) domain.SessionRecord {
 		AutoInjectCI:       row.AutoInjectCI,
 		OutputType:         normalizeSessionOutputType(domain.SessionOutputType(row.SessionOutputType)),
 		Metadata: domain.SessionMetadata{
+			WorkspaceScope: scope, WorkspaceScopeVersion: scopeVersion,
 			Branch:                           row.Branch,
 			WorkspacePath:                    row.WorkspacePath,
 			WorkspaceRepoPath:                row.WorkspaceRepoPath,
@@ -1043,6 +1045,7 @@ func listAllSessionsRowToRecord(row gen.ListAllSessionsRow) domain.SessionRecord
 func recordToInsert(rec domain.SessionRecord, num int64) gen.InsertSessionParams {
 	activity := normalActivity(rec.Activity, rec.CreatedAt)
 	return gen.InsertSessionParams{
+		WorkspaceScope:                   encodeWorkspaceScope(rec.Metadata),
 		ID:                               rec.ID,
 		ProjectID:                        optionalProjectID(rec.ProjectID),
 		Num:                              num,
@@ -1262,4 +1265,28 @@ func normalActivity(a domain.Activity, fallback time.Time) domain.Activity {
 	// rather than trusting each caller's clock.
 	a.LastActivityAt = a.LastActivityAt.UTC()
 	return a
+}
+
+// Scope is insert-only. NULL is legacy; malformed/non-versioned persisted
+// values retain a corrupt marker so recovery cannot expand to all repositories.
+func decodeWorkspaceScope(raw sql.NullString) (*domain.WorkspaceScope, int) {
+	if !raw.Valid {
+		return nil, 0
+	}
+	var scope domain.WorkspaceScope
+	if err := json.Unmarshal([]byte(raw.String), &scope); err != nil {
+		return nil, -1
+	}
+	return &scope, 1
+}
+
+func encodeWorkspaceScope(metadata domain.SessionMetadata) sql.NullString {
+	if metadata.WorkspaceScope == nil && metadata.WorkspaceScopeVersion == 0 {
+		return sql.NullString{}
+	}
+	raw, err := json.Marshal(metadata.WorkspaceScope)
+	if err != nil {
+		return sql.NullString{String: "invalid", Valid: true}
+	}
+	return sql.NullString{String: string(raw), Valid: true}
 }

@@ -251,7 +251,7 @@ func TestTaskPreparationPersistsPartialWorkspaceProjectAcrossStartup(t *testing.
 		},
 	}}
 	m.runBackground = func(work func()) { work() }
-	token, err := m.PrepareTaskWorkspace(context.Background(), project)
+	token, err := prepareLegacyTaskWorkspace(t, m, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -585,7 +585,7 @@ func TestCancelWorkspaceProjectPreparationRemovesEachBranch(t *testing.T) {
 		{Name: "local-assets", RelativePath: "local-assets", GitStatus: domain.GitStatusNeedsInit},
 	}
 
-	token, err := m.PrepareTaskWorkspace(context.Background(), project)
+	token, err := prepareLegacyTaskWorkspace(t, m, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -622,7 +622,7 @@ func TestStartupCleanupPreservesUnrecordedDirtyChildWorktree(t *testing.T) {
 	project.Kind = domain.ProjectKindWorkspace
 	st.projects["mer"] = project
 	st.workspaceRepo["mer"] = []domain.WorkspaceRepoRecord{{Name: "api", RelativePath: "api", GitStatus: domain.GitStatusReady}}
-	token, err := m.PrepareTaskWorkspace(context.Background(), project)
+	token, err := prepareLegacyTaskWorkspace(t, m, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -697,7 +697,7 @@ func TestStartupCleanupPreservesUnregisteredRecoveredChildWithUnknownCreationSHA
 	project.Kind = domain.ProjectKindWorkspace
 	st.projects["mer"] = project
 	st.workspaceRepo["mer"] = []domain.WorkspaceRepoRecord{{Name: "api", RelativePath: "api", GitStatus: domain.GitStatusReady}}
-	token, err := m.PrepareTaskWorkspace(context.Background(), project)
+	token, err := prepareLegacyTaskWorkspace(t, m, project)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -972,4 +972,30 @@ func TestStartupSafetyDefersInterruptedPreparationGitCleanup(t *testing.T) {
 	if got := st.sessions["mer-3"].ProvisionState; got != domain.SessionProvisionProvisioning {
 		t.Fatalf("background retry marked a new async spawn %q, want provisioning", got)
 	}
+}
+
+// Exercise preparations left by older daemons; new workspace sessions defer Git.
+func prepareLegacyTaskWorkspace(t *testing.T, m *Manager, project domain.ProjectRecord) (domain.TaskPreparationToken, error) {
+	t.Helper()
+	if project.Kind.WithDefault() != domain.ProjectKindWorkspace {
+		return m.PrepareTaskWorkspace(context.Background(), project)
+	}
+	rec := seedRecord(ports.SpawnConfig{ProjectID: domain.ProjectID(project.ID), Kind: domain.KindWorker}, project.Config, m.clock())
+	rec.IsTaskPreparation = true
+	rec.ProvisionState = domain.SessionProvisionProvisioning
+	rec, err := m.store.CreateSession(context.Background(), rec)
+	if err != nil {
+		return "", err
+	}
+	rec.Metadata.Branch = DefaultSpawnBranch(rec.ID, rec.Kind, sessionPrefix(project), domain.ProjectKindWorkspace, m.dataDir)
+	if err := m.store.UpdateSession(context.Background(), rec); err != nil {
+		return "", err
+	}
+	prepCtx, cancel := context.WithCancel(context.Background())
+	prep := &taskPreparation{record: rec, project: project, done: make(chan struct{}), cancel: cancel}
+	token := domain.TaskPreparationToken(rec.ID)
+	m.taskPreparations[token] = prep
+	m.scheduleTaskPreparationCleanup(token, prep)
+	m.runInBackground(func() { m.createTaskPreparation(prepCtx, prep) })
+	return token, nil
 }

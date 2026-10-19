@@ -100,7 +100,7 @@ import type { WorkspaceSummary } from "../../types/workspace";
 import { ShellProvider, type ShellContextValue } from "../../lib/shell-context";
 import { useUiStore } from "../../stores/ui-store";
 
-type Project = { id: string; name: string; path: string; orchestratorAgent?: string };
+type Project = { id: string; name: string; path: string; orchestratorAgent?: string; kind?: "workspace"; workspaceRepos?: { name: string; relativePath: string; repo: string }[] };
 type Session = Record<string, unknown>;
 
 function respondWith(
@@ -111,6 +111,7 @@ function respondWith(
 ) {
 	getMock.mockImplementation(async (url: string) => {
 		if (url === "/api/v1/projects") return { data: { projects }, error: undefined };
+		if (url === "/api/v1/projects/{id}") return { data: { status: "ok", project: projects[0] }, error: undefined };
 		if (url === "/api/v1/sessions") return { data: { sessions }, error: undefined };
 		if (url === "/api/v1/system/requirements") {
 			return {
@@ -511,8 +512,8 @@ describe("project board with no sessions", () => {
 		await userEvent.click(spawnButton);
 		await userEvent.click(await screen.findByRole("button", { name: "Create as Terminal UI" }));
 
-		expect(spawnOrchestratorMock).toHaveBeenNthCalledWith(1, "proj-1", "board", false, undefined);
-		expect(spawnOrchestratorMock).toHaveBeenNthCalledWith(2, "proj-1", "board", false, "tui");
+		expect(spawnOrchestratorMock).toHaveBeenNthCalledWith(1, "proj-1", "board", false, undefined, undefined, undefined, undefined);
+		expect(spawnOrchestratorMock).toHaveBeenNthCalledWith(2, "proj-1", "board", false, "tui", undefined, undefined, undefined);
 	});
 
 	it("opens project settings instead of spawning when no orchestrator agent is configured", async () => {
@@ -700,13 +701,23 @@ describe.each([false, true])("shared project board actions, in-panel header=%s",
 		expect(headerTask).toHaveClass("topbar-control--secondary");
 	});
 
-	it("shows the starting chat while a request is pending, then restores the board with Terminal UI recovery", async () => {
-		respondWith([project], []);
+	it.each([
+		{ label: "all", names: undefined },
+		{ label: "root only", names: [] },
+		{ label: "selected", names: ["api"] },
+	])("preserves $label repositories through starting chat and Terminal UI recovery", async ({ names }) => {
+		respondWith([{ ...project, kind: "workspace", workspaceRepos: [{ name: "api", relativePath: "api", repo: "https://example.com/api.git" }] }], []);
 		let rejectSpawn!: (error: Error) => void;
 		spawnOrchestratorMock.mockImplementationOnce(() => new Promise<string>((_resolve, reject) => { rejectSpawn = reject; }));
 		spawnOrchestratorMock.mockResolvedValueOnce("orch-retry");
 		renderBoard(board());
 		await screen.findByTestId("project-board-empty");
+		if (names !== undefined) {
+			await userEvent.click(screen.getAllByRole("button", { name: "Session repositories" })[0]);
+			await userEvent.click(screen.getByRole("button", { name: "Workspace root only" }));
+			if (names.length > 0) await userEvent.click(await screen.findByRole("checkbox", { name: "api" }));
+			await userEvent.keyboard("{Escape}");
+		}
 		const buttons = screen.getAllByRole("button", { name: "Spawn Orchestrator" });
 		expect(buttons).toHaveLength(2);
 		act(() => { buttons[0].click(); buttons[1].click(); });
@@ -723,10 +734,14 @@ describe.each([false, true])("shared project board actions, in-panel header=%s",
 		}
 		act(() => rejectSpawn(Object.assign(new Error("Chat driver unavailable"), { code: "CHAT_DRIVER_UNAVAILABLE" })));
 		expect(await screen.findByText("Chat driver unavailable")).toBeInTheDocument();
+		for (const picker of screen.getAllByRole("button", { name: "Session repositories" })) {
+			expect(picker).toHaveAttribute("title", names === undefined ? "All repositories" : names.length === 0 ? "Workspace root only" : "api");
+		}
 		for (const button of screen.getAllByRole("button", { name: "Spawn Orchestrator" })) expect(button).toBeEnabled();
 		await userEvent.click(await screen.findByRole("button", { name: "Create as Terminal UI" }));
 		await waitFor(() => expect(spawnOrchestratorMock).toHaveBeenCalledTimes(2));
-		expect(spawnOrchestratorMock).toHaveBeenLastCalledWith("proj-1", "board", false, "tui");
+		expect(spawnOrchestratorMock).toHaveBeenNthCalledWith(1, "proj-1", inPanel ? "board" : "topbar", false, undefined, undefined, undefined, names);
+		expect(spawnOrchestratorMock).toHaveBeenLastCalledWith("proj-1", "board", false, "tui", undefined, undefined, names);
 		await waitFor(() => expect(navigateMock).toHaveBeenCalledWith({
 			to: "/projects/$projectId/sessions/$sessionId", params: { projectId: "proj-1", sessionId: "orch-retry" },
 		}));

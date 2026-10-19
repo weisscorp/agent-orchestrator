@@ -1823,6 +1823,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/rcp/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read a bounded RCP feature catalog without starting work */
+        get: operations["listRCPFeatures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rcp/features/{featureId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Read the selected RCP feature plan, repositories and recent history */
+        get: operations["resumeRCPFeature"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/remote-host/account-token": {
         parameters: {
             query?: never;
@@ -5459,6 +5493,7 @@ export interface components {
             model?: string;
             projectId: string;
             taskPreparation?: string;
+            workspaceRepos?: null | string[];
         };
         DelegateTaskResponse: {
             ok: boolean;
@@ -6135,6 +6170,61 @@ export interface components {
             pat: string;
             refreshToken?: string;
             refreshTokenExpiresIn?: number;
+        };
+        RCPContextResponse: {
+            feature: components["schemas"]["RCPFeature"];
+            history_total: number;
+            history_truncated: boolean;
+            integrations: components["schemas"]["RCPIntegration"][];
+            memories: components["schemas"]["RCPMemory"][];
+            repositories: components["schemas"]["RCPRepository"][];
+        };
+        RCPFeature: {
+            constraints: string[];
+            goal: string;
+            id: string;
+            problem: string;
+            product_id: string;
+            repositories: string[];
+            requirements: string[];
+            status: string;
+            title: string;
+        };
+        RCPFeaturesResponse: {
+            features: components["schemas"]["RCPFeature"][];
+            repositories: components["schemas"]["RCPRepository"][];
+            truncated: boolean;
+        };
+        RCPIntegration: {
+            acceptance_criteria: string[];
+            completed: string[];
+            feature_id: string;
+            id: string;
+            objective: string;
+            owner: string;
+            remaining: string[];
+            repositories: string[];
+            status: string;
+            title: string;
+        };
+        RCPMemory: {
+            body: string;
+            completed: string[];
+            created_at: string;
+            current: string;
+            id: string;
+            integration_id: string;
+            kind: string;
+            next: string[];
+            reason: string;
+            remaining: string[];
+            title: string;
+            warnings: string[];
+        };
+        RCPRepository: {
+            id: string;
+            name: string;
+            url: string;
         };
         RegisterPushDeviceRequest: {
             /** @description Human-friendly device label. */
@@ -6954,6 +7044,7 @@ export interface components {
             /** @enum {string} */
             mode?: "chat" | "tui";
             projectId: string;
+            workspaceRepos?: null | string[];
         };
         SpawnOrchestratorResponse: {
             orchestrator: components["schemas"]["OrchestratorResponse"];
@@ -6981,6 +7072,7 @@ export interface components {
             requestedOutput?: "artifact";
             /** @enum {string} */
             trackerProvider?: "github" | "gitlab";
+            workspaceRepos?: null | string[];
         };
         SpawnSessionResponse: {
             promptBytes: number;
@@ -13514,6 +13606,86 @@ export interface operations {
             };
             /** @description Not Implemented */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    listRCPFeatures: {
+        parameters: {
+            query?: {
+                productId?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RCPFeaturesResponse"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+        };
+    };
+    resumeRCPFeature: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                featureId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RCPContextResponse"];
+                };
+            };
+            /** @description Bad Gateway */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

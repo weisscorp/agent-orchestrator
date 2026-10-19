@@ -52,6 +52,14 @@ describe("spawnOrchestrator", () => {
 		vi.clearAllMocks();
 	});
 
+	it.each([undefined, [], ["api"]])("preserves explicit repository selection %j", async (workspaceRepos) => {
+		vi.mocked(apiClient.POST).mockResolvedValue({ data: { orchestrator: { id: "orch" } }, response: { status: 200 } } as never);
+		await spawnOrchestrator("proj", "board", false, undefined, undefined, undefined, workspaceRepos);
+		expect(apiClient.POST).toHaveBeenCalledWith("/api/v1/orchestrators", {
+			body: { projectId: "proj", clean: false, ...(workspaceRepos !== undefined ? { workspaceRepos } : {}) },
+		});
+	});
+
 	it("sends clean:true through to the request body when asked", async () => {
 		(apiClient.POST as ReturnType<typeof vi.fn>).mockResolvedValue({
 			data: { orchestrator: { id: "proj-9" } },

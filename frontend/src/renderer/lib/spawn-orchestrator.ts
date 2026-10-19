@@ -64,11 +64,12 @@ export async function spawnOrchestrator(
 	mode?: SessionMode,
 	approvalMode?: "default" | "accept-edits" | "auto" | "bypass-permissions",
 	hostId?: string,
+	workspaceRepos?: string[],
 ): Promise<string> {
 	void captureRendererEvent("ao.renderer.orchestrator_spawn_requested", { project_id: projectId, source });
 	try {
 		const { data, error, response } = await clientForSessionHost(hostId).POST("/api/v1/orchestrators", {
-			body: { projectId, clean, ...(mode ? { mode } : {}), ...(approvalMode ? { approvalMode } : {}) },
+			body: { projectId, clean, ...(workspaceRepos !== undefined ? { workspaceRepos } : {}), ...(mode ? { mode } : {}), ...(approvalMode ? { approvalMode } : {}) },
 		});
 
 		if (error || !data?.orchestrator?.id) {

@@ -600,6 +600,7 @@ func (s *Service) SpawnOrchestrator(
 	clean bool,
 	requestedMode domain.SessionMode,
 	approval domain.PermissionMode,
+	workspaceRepos ...[]string,
 ) (domain.Session, error) {
 	unlock := s.lockOrchestratorProject(projectID)
 	defer unlock()
@@ -607,6 +608,19 @@ func (s *Service) SpawnOrchestrator(
 	project, err := s.requireProject(ctx, projectID)
 	if err != nil {
 		return domain.Session{}, err
+	}
+	var selected []string
+	if len(workspaceRepos) > 0 {
+		selected = workspaceRepos[0]
+	}
+	if selected != nil {
+		repos, readErr := s.store.ListWorkspaceRepos(ctx, string(projectID))
+		if readErr != nil {
+			return domain.Session{}, readErr
+		}
+		if _, err := sessionmanager.ResolveWorkspaceScope(project, repos, selected); err != nil {
+			return domain.Session{}, toAPIError(err)
+		}
 	}
 	mode := requestedMode
 	if clean {
@@ -639,10 +653,11 @@ func (s *Service) SpawnOrchestrator(
 		}
 	}
 	sess, _, _, err := s.spawn(ctx, ports.SpawnConfig{
-		ProjectID:     projectID,
-		Kind:          domain.KindOrchestrator,
-		Async:         true,
-		RequestedMode: mode,
+		WorkspaceRepos: selected,
+		ProjectID:      projectID,
+		Kind:           domain.KindOrchestrator,
+		Async:          true,
+		RequestedMode:  mode,
 		AgentConfig: ports.AgentConfig{
 			Permissions: approval,
 		},
@@ -1529,6 +1544,8 @@ func mapSessionError(err error) error {
 	case errors.Is(err, domain.ErrAgentSwitchInProgress):
 		return apierr.Conflict("AGENT_SWITCH_IN_PROGRESS",
 			"This session already has an agent switch in progress", nil)
+	case errors.Is(err, sessionmanager.ErrInvalidWorkspaceSelection):
+		return apierr.Invalid("INVALID_WORKSPACE_REPOSITORIES", err.Error(), nil)
 	case errors.Is(err, sessionmanager.ErrScratchBranchUnsupported):
 		return apierr.Invalid("SCRATCH_BRANCH_UNSUPPORTED", err.Error(), nil)
 	case errors.Is(err, ports.ErrWorkspaceBranchCheckedOutElsewhere):

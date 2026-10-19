@@ -210,7 +210,7 @@ export function SessionsBoard({ projectId, hostId }: SessionsBoardProps) {
 	const actions = projectId && (!hostId || connected) ? (
 		<>
 			<ProjectTerminationFeedback projectId={projectId} hostId={hostId} />
-			<ProjectBoardActions actions={projectActions} placement="header" quiet={showProjectEmpty} cloud={workspace?.kind === CLOUD_PROJECT_KIND} />
+			<ProjectBoardActions hostId={hostId} project={workspace} actions={projectActions} placement="header" quiet={showProjectEmpty} cloud={workspace?.kind === CLOUD_PROJECT_KIND} />
 			{boardOwnsNotificationCenter ? (
 				<>
 					<NotificationCenter />
@@ -309,7 +309,7 @@ export function SessionsBoard({ projectId, hostId }: SessionsBoardProps) {
 				) : hostId && !workspace ? null : showWelcome ? (
 				<BoardWelcome />
 				) : showProjectEmpty ? (
-					<ProjectBoardEmpty actions={<ProjectBoardActions actions={projectActions} placement="empty" />} />
+					<ProjectBoardEmpty actions={<ProjectBoardActions hostId={hostId} project={workspace} actions={projectActions} placement="empty" />} />
 				) : (
 					<SessionsBoardGridView
 						columns={columns}

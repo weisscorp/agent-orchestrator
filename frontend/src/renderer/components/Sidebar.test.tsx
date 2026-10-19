@@ -778,6 +778,17 @@ describe("Sidebar", () => {
 		expect(content).not.toContainElement(screen.getByText("Projects"));
 	});
 
+	it("lets the workspace sidebar launch an orchestrator with only its root", async () => {
+		const user = userEvent.setup();
+		spawnMock.mockResolvedValueOnce("new-orchestrator");
+		renderSidebar({ workspaces: [{ ...workspace, kind: "workspace", sessions: [], workspaceRepos: [{ name: "api", repo: "https://example.com/api.git", relativePath: "api" }] }] });
+		await user.click(screen.getByRole("button", { name: "Spawn Project One orchestrator" }));
+		expect(spawnMock).not.toHaveBeenCalled();
+		await user.click(screen.getByRole("button", { name: "Workspace root only" }));
+		await user.click(screen.getByRole("button", { name: "Start orchestrator" }));
+		await waitFor(() => expect(spawnMock).toHaveBeenCalledWith("proj-1", "sidebar", false, undefined, undefined, undefined, []));
+	});
+
 	it("opens project settings instead of spawning when no orchestrator agent is configured", async () => {
 		const user = userEvent.setup();
 		renderSidebar({ workspaces: [{ ...workspace, orchestratorAgent: undefined }] });

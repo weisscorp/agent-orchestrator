@@ -430,7 +430,9 @@ type ListSessionsResponse struct {
 
 // SpawnSessionRequest is the body of POST /api/v1/sessions.
 type SpawnSessionRequest struct {
-	ClientRequestID string `json:"clientRequestId,omitempty" maxLength:"128"`
+	// WorkspaceRepos selects workspace child repository names. Omitted includes all; [] includes only the root.
+	WorkspaceRepos  *[]string `json:"workspaceRepos,omitempty"`
+	ClientRequestID string    `json:"clientRequestId,omitempty" maxLength:"128"`
 	// ProjectID is omitted for a standalone worker session.
 	ProjectID domain.ProjectID `json:"projectId,omitempty"`
 	IssueID   domain.IssueID   `json:"issueId,omitempty"`
@@ -1111,6 +1113,8 @@ type SendSessionMessageResponse struct {
 // DelegateTaskRequest is the body of POST /api/v1/orchestrators/delegate.
 // An omitted agent tells the orchestrator to use the project's worker default.
 type DelegateTaskRequest struct {
+	// WorkspaceRepos selects child names; omitted includes all and [] only the root.
+	WorkspaceRepos  *[]string           `json:"workspaceRepos,omitempty"`
 	ClientRequestID string              `json:"clientRequestId,omitempty" maxLength:"128"`
 	ProjectID       domain.ProjectID    `json:"projectId"`
 	Brief           string              `json:"brief" maxLength:"16384"`
@@ -1489,8 +1493,10 @@ type ReviewIDParam struct {
 
 // SpawnOrchestratorRequest is the body of POST /api/v1/orchestrators.
 type SpawnOrchestratorRequest struct {
-	ProjectID domain.ProjectID `json:"projectId"`
-	Clean     bool             `json:"clean,omitempty"`
+	// WorkspaceRepos selects child names; omitted includes all and [] only the root.
+	WorkspaceRepos *[]string        `json:"workspaceRepos,omitempty"`
+	ProjectID      domain.ProjectID `json:"projectId"`
+	Clean          bool             `json:"clean,omitempty"`
 	// Mode applies only when this request creates a project orchestrator. An
 	// idempotent ensure returns the existing orchestrator unchanged, and a clean
 	// replacement inherits the existing orchestrator's currently committed mode.

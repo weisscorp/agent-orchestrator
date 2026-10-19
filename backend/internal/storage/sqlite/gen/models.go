@@ -723,6 +723,7 @@ type Session struct {
 	StaleBinaryVersion               string
 	StaleBinaryLaunch                string
 	StaleBinarySwitchFailedAt        sql.NullTime
+	WorkspaceScope                   sql.NullString
 }
 
 type SessionAgentAccount struct {

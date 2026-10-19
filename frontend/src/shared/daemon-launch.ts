@@ -27,7 +27,9 @@ export function resolveDaemonLaunch(
 		return {
 			command: configuredCommand,
 			args: [],
-			cwd: appPath,
+			// Packaged appPath points inside app.asar, which is not a native
+			// process working directory. Keep development commands checkout-relative.
+			cwd: isPackaged ? joinPath(homeDir, ".ao") : appPath,
 			shell: true,
 			source: "configured",
 		};

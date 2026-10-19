@@ -16,8 +16,12 @@ var ErrActivityProjectionContention = errors.New("activity projection contention
 // SpawnConfig is the request to start a new session: which project/issue, which
 // agent harness, and the branch/prompt the agent launches with.
 type SpawnConfig struct {
-	ProjectID domain.ProjectID
-	IssueID   domain.IssueID
+	// WorkspaceRepos selects child names; nil includes all, an empty slice only the root.
+	WorkspaceRepos []string
+	// WorkspaceScope is resolved by the manager and persisted before Git work.
+	WorkspaceScope *domain.WorkspaceScope
+	ProjectID      domain.ProjectID
+	IssueID        domain.IssueID
 	// AutomationRunID makes one scheduled occurrence idempotent across daemon
 	// restarts. Ordinary interactive spawns leave this unset.
 	AutomationRunID *domain.AutomationRunID
