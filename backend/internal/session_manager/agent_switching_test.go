@@ -1273,6 +1273,7 @@ func TestSwitchAgentChatForwardsResolvedCodexEffort(t *testing.T) {
 		Name: "ao", Type: "stdio", Command: "/opt/ao/bin/ao", Args: []string{"mcp"},
 		Env: map[string]string{EnvSessionID: string(rec.ID), EnvRunFile: "/ao-test/running.json", EnvDataDir: manager.dataDir},
 	}}
+	want = append(want, ports.ChatMCPServerConfig{Name: "release_control", Type: "http", URL: "http://127.0.0.1:8090/mcp"})
 	if got := launcher.started[0].MCPServers; !reflect.DeepEqual(got, want) {
 		t.Fatalf("switch MCPServers = %+v, want %+v", got, want)
 	}

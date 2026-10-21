@@ -161,9 +161,26 @@ const (
 	ArtifactVersionSourceUser ArtifactVersionSource = "user"
 )
 
-// SessionMetadata is the typed, off-status metadata for a session: operational
-// handles and seed inputs used by Session Manager and reaper.
+// WorkspaceScope pins the complete repository selection before Git preparation.
+// Absence identifies legacy sessions; an unsupported version must fail closed.
+type WorkspaceScope struct {
+	Version  int                  `json:"version"`
+	RootPath string               `json:"rootPath"`
+	Repos    []WorkspaceScopeRepo `json:"repos"`
+}
+
+// WorkspaceScopeRepo contains only the immutable nonsecret materialization inputs.
+type WorkspaceScopeRepo struct {
+	Name          string    `json:"name"`
+	RelativePath  string    `json:"relativePath"`
+	DefaultBranch string    `json:"defaultBranch,omitempty"`
+	GitStatus     GitStatus `json:"gitStatus,omitempty"`
+}
+
+// SessionMetadata is the typed, off-status operational state for a session.
 type SessionMetadata struct {
+	WorkspaceScope        *WorkspaceScope `json:"workspaceScope,omitempty"`
+	WorkspaceScopeVersion int             `json:"workspaceScopeVersion,omitempty"`
 	// Permissions pins the resolved launch policy independently of future project defaults.
 	Permissions PermissionMode `json:"permissions,omitempty"`
 

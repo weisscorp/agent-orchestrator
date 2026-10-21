@@ -259,6 +259,179 @@ func TestResumeFailedAsyncChatSpawnRetriesSameSessionAndQueue(t *testing.T) {
 	testResumeFailedAsyncChatSpawn(t, domain.KindWorker)
 }
 
+type failNamedChildRowStore struct{ *fakeStore }
+
+func (s failNamedChildRowStore) UpsertSessionWorktree(ctx context.Context, row domain.SessionWorktreeRecord) error {
+	if row.RepoName == "api" {
+		return errors.New("transient named child row failure")
+	}
+	return s.fakeStore.UpsertSessionWorktree(ctx, row)
+}
+
+func TestResumeFailedWorkspaceChatSpawnRecoversNamingJournalBeforeInventory(t *testing.T) {
+	m, st, adapter, source := newGitTaskPreparationManager(t)
+	m.dataDir = t.TempDir()
+	launcher := &recordingLauncher{}
+	m.chat = launcher
+	child := newManagerGitRepo(t)
+	runManagerGit(t, source, "clone", child, "api")
+	if err := os.WriteFile(filepath.Join(source, ".gitignore"), []byte("api/\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runManagerGit(t, source, "add", ".gitignore")
+	runManagerGit(t, source, "commit", "-m", "ignore workspace child")
+	project := st.projects["mer"]
+	project.Kind = domain.ProjectKindWorkspace
+	project.Config.PreRemove = []string{"touch pre-remove-ran"}
+	st.projects["mer"] = project
+	st.workspaceRepo["mer"] = []domain.WorkspaceRepoRecord{{Name: "api", RelativePath: "api"}}
+	scope, err := m.resolveWorkspaceScope(t.Context(), project, []string{"api"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := st.CreateSession(t.Context(), domain.SessionRecord{
+		ProjectID: "mer", Kind: domain.KindWorker, Harness: domain.HarnessCodex, Mode: domain.SessionModeChat, ProvisionState: domain.SessionProvisionFailed,
+		Metadata: domain.SessionMetadata{Prompt: "continue API work", WorkspaceScope: scope, WorkspaceScopeVersion: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, info, err := m.createSessionWorkspace(t.Context(), project, ports.SpawnConfig{ProjectID: "mer", Kind: domain.KindWorker, WorkspaceScope: scope}, rec.ID, "ao/mer-1/root", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Metadata.WorkspacePath, rec.Metadata.WorkspaceRepoPath, rec.Metadata.Branch = root.Path, source, root.Branch
+	st.sessions[rec.ID] = rec
+	if err := os.WriteFile(filepath.Join(root.Path, "api", "user-work.txt"), []byte("keep API work\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m.store = failNamedChildRowStore{st}
+	moved, _, err := m.nameTaskWorkspace(t.Context(), rec, root, info, generatedTaskName{Slug: "repair-api"})
+	if err == nil || moved.Path == root.Path {
+		t.Fatalf("missing partial naming failure: moved=%+v err=%v", moved, err)
+	}
+	failed := st.sessions[rec.ID]
+	if failed.Metadata.WorkspacePath != moved.Path {
+		t.Fatal("fixture did not publish new root before child row failure")
+	}
+	rows := st.worktrees[rec.ID]
+	if len(rows) != 2 || rows[1].RepoName != "api" || rows[1].WorktreePath != filepath.Join(root.Path, "api") {
+		t.Fatalf("fixture lost stale child ownership path: %+v", rows)
+	}
+	m.store = st
+	// A newly registered broken child must not enter the pinned retry scope.
+	st.workspaceRepo["mer"] = append(st.workspaceRepo["mer"], domain.WorkspaceRepoRecord{Name: "unrelated", RelativePath: "missing-unrelated"})
+	deferred := deferredBackground(m)
+	result, err := m.ResumeAgentWithMode(t.Context(), rec.ID)
+	if err != nil || result.Session.ProvisionState != domain.SessionProvisionProvisioning || len(*deferred) != 1 {
+		t.Fatalf("retry did not schedule: %+v %v", result, err)
+	}
+	(*deferred)[0]()
+	actual := st.sessions[rec.ID]
+	if actual.ProvisionState != domain.SessionProvisionReady || actual.Metadata.WorkspacePath != moved.Path || len(launcher.started) != 1 {
+		t.Fatalf("retry failed to recover without restart: session=%+v starts=%d", actual, len(launcher.started))
+	}
+	for _, row := range st.worktrees[rec.ID] {
+		expected := moved.Path
+		if row.RepoName == "api" {
+			expected = filepath.Join(expected, "api")
+		}
+		if row.WorktreePath != expected || row.Branch != moved.Branch {
+			t.Fatalf("stale ownership row after retry: %+v", row)
+		}
+	}
+	if len(st.worktrees[rec.ID]) != 2 {
+		t.Fatalf("retry widened repository selection: %+v", st.worktrees[rec.ID])
+	}
+	if got, err := os.ReadFile(filepath.Join(moved.Path, "api", "user-work.txt")); err != nil || string(got) != "keep API work\n" {
+		t.Fatalf("user work changed: %q %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(moved.Path, "pre-remove-ran")); !os.IsNotExist(err) {
+		t.Fatalf("retry ran cleanup hook: %v", err)
+	}
+	if _, found, err := adapter.RecoverTaskWorkspace(t.Context(), rec.ProjectID, rec.ID); found || err != nil {
+		t.Fatalf("completed retry retained naming journal: found=%v err=%v", found, err)
+	}
+}
+
+func TestResumeFailedWorkspaceChatSpawnPreservesPublishedWorkspaceWithIncompleteInventory(t *testing.T) {
+	for _, rootRow := range []bool{false, true} {
+		name := "missing inventory"
+		if rootRow {
+			name = "missing selected child row"
+		}
+		t.Run(name, func(t *testing.T) {
+			launcher := &recordingLauncher{}
+			m, st, _ := newChatManager(launcher)
+			m.dataDir = t.TempDir()
+			deferred := deferredBackground(m)
+			ws := m.workspace.(*fakeWorkspace)
+			var calls []string
+			st.sharedLog = &calls
+			ws.sharedLog = &calls
+			project := st.projects["mer"]
+			project.Kind = domain.ProjectKindWorkspace
+			project.Path = t.TempDir()
+			project.Config.PreRemove = []string{"touch pre-remove-ran"}
+			st.projects["mer"] = project
+			root := t.TempDir()
+			child := filepath.Join(root, "api")
+			if err := os.MkdirAll(child, 0700); err != nil {
+				t.Fatal(err)
+			}
+			file := filepath.Join(child, "user-work.txt")
+			if err := os.WriteFile(file, []byte("preserve existing work\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			rec := domain.SessionRecord{
+				ID: "mer-1", ProjectID: "mer", Kind: domain.KindWorker, Harness: domain.HarnessCodex, Mode: domain.SessionModeChat,
+				ProvisionState: domain.SessionProvisionFailed,
+				Metadata: domain.SessionMetadata{
+					Branch: "ao/mer-1/root", WorkspacePath: root, WorkspaceRepoPath: project.Path, Prompt: "continue work",
+					WorkspaceScopeVersion: 1,
+					WorkspaceScope:        &domain.WorkspaceScope{Version: 1, RootPath: project.Path, Repos: []domain.WorkspaceScopeRepo{{Name: "api", RelativePath: "api"}}},
+				},
+			}
+			st.sessions[rec.ID] = rec
+			var originalRows []domain.SessionWorktreeRecord
+			if rootRow {
+				originalRows = []domain.SessionWorktreeRecord{{SessionID: rec.ID, RepoName: domain.RootWorkspaceRepoName, WorktreePath: root, Branch: rec.Metadata.Branch, State: "active"}}
+				st.worktrees[rec.ID] = slices.Clone(originalRows)
+			}
+			retried, err := m.ResumeAgentWithMode(context.Background(), rec.ID)
+			if err != nil {
+				t.Fatalf("retry entrypoint: %v", err)
+			}
+			if retried.Session.ID != rec.ID || retried.Session.ProvisionState != domain.SessionProvisionProvisioning || len(*deferred) != 1 {
+				t.Fatalf("retry did not schedule same session: %+v background=%d", retried, len(*deferred))
+			}
+			(*deferred)[0]()
+			stored, exists := st.sessions[rec.ID]
+			if !exists || stored.ProvisionState != domain.SessionProvisionFailed || stored.Metadata.WorkspacePath != root {
+				t.Fatalf("retry lost published recovery state: %+v", stored)
+			}
+			if !strings.Contains(stored.ProvisionError, "durable") {
+				t.Fatalf("failure did not identify incomplete inventory: %q", stored.ProvisionError)
+			}
+			if ws.destroyed != 0 || ws.projectDestroyed != 0 || ws.createCount != 0 {
+				t.Fatalf("retry touched workspace lifecycle: destroy=%d projectDestroy=%d create=%d calls=%v", ws.destroyed, ws.projectDestroyed, ws.createCount, calls)
+			}
+			if !slices.Equal(st.worktrees[rec.ID], originalRows) || slices.Contains(calls, "DeleteSessionWorktrees:"+string(rec.ID)) {
+				t.Fatalf("retry changed ownership rows: rows=%+v calls=%v", st.worktrees[rec.ID], calls)
+			}
+			if _, err := os.Stat(filepath.Join(root, "pre-remove-ran")); !os.IsNotExist(err) {
+				t.Fatalf("pre-remove hook ran on published workspace: %v", err)
+			}
+			if got, err := os.ReadFile(file); err != nil || string(got) != "preserve existing work\n" {
+				t.Fatalf("existing child work changed: %q %v", got, err)
+			}
+			if len(launcher.started) != 0 {
+				t.Fatal("controller started without a complete workspace inventory")
+			}
+		})
+	}
+}
+
 func testResumeFailedAsyncChatSpawn(t *testing.T, kind domain.SessionKind) {
 	launcher := &recordingLauncher{}
 	m, st, _ := newChatManager(launcher)
@@ -658,6 +831,7 @@ func TestSpawnAsyncChat_WorktreeRecordFailurePreservesDirtyWorkspace(t *testing.
 	deferred := deferredBackground(m)
 	project := st.projects[string(chatTestProject)]
 	project.Kind = domain.ProjectKindWorkspace
+	project.Path = "/repo/mer"
 	st.projects[string(chatTestProject)] = project
 	ws := m.workspace.(*fakeWorkspace)
 	ws.path = t.TempDir()

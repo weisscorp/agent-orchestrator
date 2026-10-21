@@ -55,6 +55,11 @@ func newReportCommand(ctx *commandContext) *cobra.Command {
 }
 
 func (c *commandContext) report(ctx context.Context, args []string, o reportOptions) error {
+	return c.submitReport(ctx, args, o, nil)
+}
+
+// submitReport shares CLI validation and the daemon boundary with the MCP tool.
+func (c *commandContext) submitReport(ctx context.Context, args []string, o reportOptions, response *reportAPIResponse) error {
 	states := []struct {
 		on    bool
 		state domain.ReportState
@@ -120,8 +125,10 @@ func (c *commandContext) report(ctx context.Context, args []string, o reportOpti
 	for i, output := range outputs {
 		apiOutputs[i] = reportAPIOutput{Kind: string(output.Kind), Reference: output.Reference}
 	}
-	var response reportAPIResponse
-	return c.postJSON(ctx, "reports", reportAPIRequest{SessionID: sessionID, State: string(selected), Note: o.note, Message: message, Outputs: apiOutputs}, &response)
+	if response == nil {
+		response = &reportAPIResponse{}
+	}
+	return c.postJSON(ctx, "reports", reportAPIRequest{SessionID: sessionID, State: string(selected), Note: o.note, Message: message, Outputs: apiOutputs}, response)
 }
 
 func legacyReportStatus(value string) bool {

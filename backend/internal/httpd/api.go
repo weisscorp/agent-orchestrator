@@ -280,6 +280,7 @@ func (a *API) Register(root chi.Router) {
 			a.agentAuth.Register(r)
 			a.linkPreview.Register(r)
 			a.github.Register(r)
+			(&controllers.RCPController{}).Register(r)
 			// Sibling REST controllers plug in here.
 		})
 		// Long-lived streams intentionally bypass the REST timeout middleware.

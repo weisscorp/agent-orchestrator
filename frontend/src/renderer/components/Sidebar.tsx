@@ -1,3 +1,4 @@
+import { WorkspaceOrchestratorLauncher } from "./WorkspaceRepositoryPicker";
 import { useQueryClient } from "@tanstack/react-query";
 import { paidPlanBadge, useCloudBilling } from "../hooks/useCloudBilling";
 import { useTranslation } from "react-i18next";
@@ -22,6 +23,7 @@ import {
 	ChevronRight,
 	Download,
 	File,
+	FileText,
 	Folder,
 	FolderOpen,
 	LogIn,
@@ -491,7 +493,7 @@ type SidebarProps = {
 	onCreateRemoteProject: (hostId: string, input: CreateProjectInput) => Promise<void>;
 	onInitializeRemoteProject: (hostId: string, path: string) => Promise<void>;
 	onOpenRemoteProject?: (hostId: string, projectId: string) => void;
-	onOpenRemoteOrchestrator?: (hostId: string, projectId: string) => void;
+	onOpenRemoteOrchestrator?: (hostId: string, projectId: string, workspaceRepos?: string[]) => void;
 	onConfigureRemoteProject?: (hostId: string, projectId: string) => void;
 	onRemoveRemoteProject?: (hostId: string, projectId: string) => Promise<void>;
 	onRetryRemoteHosts?: () => void;
@@ -522,6 +524,7 @@ function useSelection() {
 	const goHome = useCallback(() => void navigate({ to: "/" }), [navigate]);
 	const goAutomations = useCallback(() => void navigate({ to: "/automations" }), [navigate]);
 	const goArtifacts = useCallback(() => void navigate({ to: "/artifacts" }), [navigate]);
+	const goRCP = useCallback(() => void navigate({ to: "/rcp" }), [navigate]);
 	const goStandaloneBoard = useCallback(() => void navigate({ to: "/sessions" }), [navigate]);
 	const goGlobalSettings = useCallback(() => openGlobalSettings(), [openGlobalSettings]);
 	const goConnectMobile = useCallback(() => openGlobalSettings("mobile"), [openGlobalSettings]);
@@ -547,6 +550,7 @@ function useSelection() {
 		isHome: pathname === "/",
 		isAutomations: pathname === "/automations",
 		isArtifacts: pathname === "/artifacts",
+		isRCP: pathname === "/rcp",
 		activeRemoteHostId: params.hostId,
 		activeRemoteProjectId: params.hostId ? params.projectId : undefined,
 		activeRemoteSessionId: params.hostId ? params.sessionId : undefined,
@@ -555,6 +559,7 @@ function useSelection() {
 		goHome,
 		goAutomations,
 		goArtifacts,
+		goRCP,
 		goStandaloneBoard,
 		// Settings is a modal — open it in place so the current page (session
 		// terminal, board, etc.) stays underneath.
@@ -563,7 +568,7 @@ function useSelection() {
 		goSettings,
 		goProject,
 		goSession,
-	}), [goArtifacts, goAutomations, goConnectMobile, goGlobalSettings, goHome, goProject, goSession, goSettings, goStandaloneBoard, params.hostId, params.projectId, params.sessionId, pathname]);
+	}), [goRCP, goArtifacts, goAutomations, goConnectMobile, goGlobalSettings, goHome, goProject, goSession, goSettings, goStandaloneBoard, params.hostId, params.projectId, params.sessionId, pathname]);
 }
 
 // Colour tracks the session's board section, preserving SCM state while the
@@ -1017,6 +1022,7 @@ export function Sidebar({
 					</SidebarGroup>
 				) : null}
 				<SidebarMenu className="mb-3 gap-0.5 group-data-[collapsible=icon]:gap-1">
+					<SidebarMenuItem><SidebarTopNavRow active={selection.isRCP} icon={<FileText aria-hidden="true" />} label={t("rcp.features")} onClick={selection.goRCP} tooltip={isCollapsed ? t("rcp.features") : undefined} /></SidebarMenuItem>
 					<SidebarMenuItem>
 						<SidebarTopNavRow
 							active={selection.isAutomations}
@@ -1162,7 +1168,7 @@ export function Sidebar({
 														return next;
 													})}
 													onRemoveProject={(projectId) => onRemoveRemoteProject(hostId, projectId)}
-													onOpenOrchestrator={() => onOpenRemoteOrchestrator(hostId, workspace.id)}
+													onOpenOrchestrator={(names) => onOpenRemoteOrchestrator(hostId, workspace.id, names)}
 													suppressInitialExpandAnimation
 													onProjectDragStart={() => undefined}
 													onProjectDragEnd={() => undefined}
@@ -1376,7 +1382,7 @@ type Selection = ReturnType<typeof useSelection>;
 type ProjectItemProps = {
 	workspace: WorkspaceSummary;
 	hostLabel?: string;
-	onOpenOrchestrator?: () => void;
+	onOpenOrchestrator?: (names?: string[]) => void;
 	expanded: boolean;
 	selection: Selection;
 	isDragged: boolean;
@@ -1531,11 +1537,11 @@ const ProjectItem = memo(function ProjectItem({
 	// spawn one via the daemon and follow it once the workspace refetches.
 	// Expand a collapsed project so opening the orchestrator also reveals its
 	// session list — otherwise the tree stays shut while you're inside it.
-	const openOrchestrator = async () => {
+	const openOrchestrator = async (workspaceRepos?: string[]) => {
 		if (isSpawning || isProjectProvisioning || isProjectRestarting) return;
 		if (!expanded) toggleDisclosure();
 		if (onOpenOrchestrator) {
-			onOpenOrchestrator();
+			onOpenOrchestrator(workspaceRepos);
 			return;
 		}
 		if (orchestrator) {
@@ -1587,7 +1593,7 @@ const ProjectItem = memo(function ProjectItem({
 		}
 		setIsSpawning(true);
 		try {
-			const sessionId = await spawnOrchestrator(workspace.id, "sidebar");
+			const sessionId = await spawnOrchestrator(workspace.id, "sidebar", false, undefined, undefined, undefined, workspaceRepos);
 			await queryClient.invalidateQueries({ queryKey: workspaceQueryKey });
 			selection.goSession(workspace.id, sessionId);
 		} catch (err) {
@@ -1793,6 +1799,8 @@ const ProjectItem = memo(function ProjectItem({
 								<Tooltip>
 									<TooltipTrigger asChild>
 										<span className="inline-flex">
+											<WorkspaceOrchestratorLauncher enabled={!orchestrator && workspace.kind === "workspace"} projectId={workspace.id} hostId={workspace.hostId} repositories={workspace.workspaceRepos}
+												onStart={(names) => void openOrchestrator(names)} disabled={isSpawning || isProjectProvisioning || isProjectRestarting}>
 											<button
 												aria-current={orchestratorActive ? "page" : undefined}
 												aria-label={
@@ -1806,11 +1814,12 @@ const ProjectItem = memo(function ProjectItem({
 												}
 													className={cn(HOVER_ACTION_CLASS, orchestratorActive && "text-foreground")}
 													disabled={isSpawning || isProjectProvisioning || isProjectRestarting}
-												onClick={() => void openOrchestrator()}
+												onClick={!orchestrator && workspace.kind === "workspace" ? undefined : () => void openOrchestrator()}
 												type="button"
 											>
 												<OrchestratorIcon aria-hidden="true" strokeWidth={orchestratorActive ? 2.5 : 2} />
 											</button>
+											</WorkspaceOrchestratorLauncher>
 										</span>
 									</TooltipTrigger>
 										<TooltipContent>

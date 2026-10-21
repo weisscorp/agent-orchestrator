@@ -219,6 +219,7 @@ export default defineConfig({
 	// a plain browser without an Electron shell.
 	server: {
 		proxy: {
+			"/readyz": { target: process.env.AO_DEV_API_TARGET ?? "http://127.0.0.1:3001", changeOrigin: false },
 			"/api": {
 				target: process.env.AO_DEV_API_TARGET ?? "http://127.0.0.1:3001",
 				changeOrigin: false,

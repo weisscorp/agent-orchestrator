@@ -316,6 +316,7 @@ Your job is to complete the assigned task in this workspace. For implementation,
 ## Worker Reports
 
 Use `+"`ao report`"+` to persist meaningful progress for the active project orchestrator. `+"`AO_SESSION_ID`"+` selects this worker automatically.
+If shell loopback access is blocked, use the AO MCP `+"`session_report`"+` tool with the equivalent state, note, and outputs. It is bound to this session and returns the saved report ID. Do not relax sandbox or network permissions. AO reports do not replace RCP progress and handoff records.
 
 - After a meaningful milestone, run `+"`ao report --checkpoint --note <text>`"+`.
 - When a decision or missing input blocks progress, run `+"`ao report --needs-input --note <text>`"+`.

@@ -4875,6 +4875,10 @@ func TestRestore_WorkspaceProjectRestoresChildrenAndRecordsInventory(t *testing.
 	st.workspaceRepo["mer"] = []domain.WorkspaceRepoRecord{{Name: "api", RelativePath: "services/api"}}
 	seedTerminal(st, "mer-1", domain.SessionMetadata{WorkspacePath: "/ws/mer-1", Branch: "ao/mer-1", AgentSessionID: "agent-x"})
 
+	st.worktrees["mer-1"] = []domain.SessionWorktreeRecord{
+		{SessionID: "mer-1", RepoName: domain.RootWorkspaceRepoName, WorktreePath: "/ws/mer-1", Branch: "ao/mer-1"},
+		{SessionID: "mer-1", RepoName: "api", WorktreePath: "/ws/mer-1/services/api", Branch: "ao/mer-1"},
+	}
 	if _, err := m.RestoreWithMode(ctx, "mer-1"); err != nil {
 		t.Fatal(err)
 	}
@@ -6378,7 +6382,7 @@ func TestSpawnOrchestrator_ProjectRulesInSystemPrompt(t *testing.T) {
 
 func TestSpawnOrchestrator_WorkspaceProjectPromptListsRepos(t *testing.T) {
 	st := newFakeStore()
-	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Kind: domain.ProjectKindWorkspace, Config: testRoleAgents()}
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Path: "/repo/mer", Kind: domain.ProjectKindWorkspace, Config: testRoleAgents()}
 	st.workspaceRepo["mer"] = []domain.WorkspaceRepoRecord{
 		{Name: "api", RelativePath: "services/api"},
 		{Name: "web", RelativePath: "apps/web"},
@@ -6401,7 +6405,7 @@ func TestSpawnOrchestrator_WorkspaceProjectPromptListsRepos(t *testing.T) {
 		"- __root__: .",
 		"- api: services/api",
 		"- web: apps/web",
-		"When spawning workers, name the repository path",
+		"When spawning workers, select each child explicitly",
 		"track deliverables, pull requests, and checks by repository",
 	} {
 		if !strings.Contains(systemPrompt, want) {
@@ -6415,7 +6419,7 @@ func TestSpawnOrchestrator_WorkspaceProjectPromptListsRepos(t *testing.T) {
 
 func TestSpawnWorker_WorkspaceProjectPromptListsRepos(t *testing.T) {
 	st := newFakeStore()
-	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Kind: domain.ProjectKindWorkspace, Config: testRoleAgents()}
+	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Path: "/repo/mer", Kind: domain.ProjectKindWorkspace, Config: testRoleAgents()}
 	st.workspaceRepo["mer"] = []domain.WorkspaceRepoRecord{{Name: "api", RelativePath: "api"}}
 	agent := &recordingAgent{}
 	rt := &fakeRuntime{}
@@ -10006,7 +10010,7 @@ func TestRestoreAll_WorkspaceProjectRestoresAndAppliesEachRepo(t *testing.T) {
 	}
 }
 
-func TestRestoreAll_WorkspaceProjectRootOnlyMarkerRestoresRegisteredChildren(t *testing.T) {
+func TestRestoreAll_WorkspaceProjectRootOnlyMarkerDoesNotAddRegisteredChildren(t *testing.T) {
 	m, st, rt, ws := newLifecycleManager()
 	st.projects["mer"] = domain.ProjectRecord{ID: "mer", Path: "/repo/mer", Kind: domain.ProjectKindWorkspace, Config: testRoleAgents()}
 	st.workspaceRepo["mer"] = []domain.WorkspaceRepoRecord{{Name: "api", RelativePath: "api"}}
@@ -10031,7 +10035,7 @@ func TestRestoreAll_WorkspaceProjectRootOnlyMarkerRestoresRegisteredChildren(t *
 	if err := m.RestoreAll(ctx); err != nil {
 		t.Fatalf("RestoreAll err = %v", err)
 	}
-	wantPrefix := []string{"Restore:__root__", "Restore:api"}
+	wantPrefix := []string{"Restore:__root__", "ApplyPreserved:__root__:refs/ao/preserved/root"}
 	if got := ws.calls[:2]; strings.Join(got, ",") != strings.Join(wantPrefix, ",") {
 		t.Fatalf("restore prefix = %v, want %v; all calls %v", got, wantPrefix, ws.calls)
 	}
@@ -10046,8 +10050,8 @@ func TestRestoreAll_WorkspaceProjectRootOnlyMarkerRestoresRegisteredChildren(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 2 {
-		t.Fatalf("workspace project rows after RestoreAll = %v, want root and registered child", rows)
+	if len(rows) != 1 {
+		t.Fatalf("workspace project rows after RestoreAll = %v, want only recorded root", rows)
 	}
 	states := map[string]string{}
 	for _, row := range rows {
@@ -10056,8 +10060,8 @@ func TestRestoreAll_WorkspaceProjectRootOnlyMarkerRestoresRegisteredChildren(t *
 			t.Fatalf("row %s preserved_ref = %q, want consumed", row.RepoName, row.PreservedRef)
 		}
 	}
-	if states[domain.RootWorkspaceRepoName] != "active" || states["api"] != "active" {
-		t.Fatalf("workspace project row states = %v, want active root and child", states)
+	if states[domain.RootWorkspaceRepoName] != "active" || states["api"] != "" {
+		t.Fatalf("workspace project row states = %v, want only active recorded root", states)
 	}
 }
 

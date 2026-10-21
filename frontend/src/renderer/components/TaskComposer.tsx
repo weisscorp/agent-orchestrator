@@ -45,6 +45,7 @@ import {
 } from "../hooks/useAgentModelsQuery";
 import { useModelCatalogAuthRecovery } from "../hooks/useModelCatalogAuthRecovery";
 import { useUiStore } from "../stores/ui-store";
+import { WorkspaceRepositoryPicker } from "./WorkspaceRepositoryPicker";
 import { ModelCatalogNotice } from "./ModelCatalogNotice";
 import { NativeModePicker } from "./NativeModePicker";
 import { STANDALONE_WORKSPACE_ID } from "../types/workspace";
@@ -61,6 +62,7 @@ type Project = components["schemas"]["Project"];
 type DelegateAgent = components["schemas"]["DelegateTaskRequest"]["agent"];
 
 type CreateTaskInput = {
+	workspaceRepos?: string[];
 	clientRequestId?: string;
 	projectId: string;
 	brief: string;
@@ -112,6 +114,9 @@ function hasErrorDetail(details: components["schemas"]["APIError"]["details"] | 
 }
 
 export type TaskComposerProps = {
+	initialPrompt?: string;
+	prepareBrief?: (brief: string, workspaceRepos?: string[]) => Promise<string>;
+	initialWorkspaceRepos?: string[];
 	projectId?: string;
 	hostId?: string;
 	onCreated: (sessionId: string) => void;
@@ -122,6 +127,9 @@ export type TaskComposerProps = {
 };
 
 export function TaskComposer({
+	initialPrompt,
+	initialWorkspaceRepos,
+	prepareBrief,
 	projectId,
 	hostId,
 	onCreated,
@@ -141,6 +149,9 @@ export function TaskComposer({
 	const remoteConnections = useConnectedHosts();
 	const hostConnected = !hostId || remoteConnections.includes(hostId);
 	const [isPromptDirty, setIsPromptDirty] = useState(false);
+	const [repositorySelection, setRepositorySelection] = useState<{ context: string; names?: string[] } | undefined>(() => initialWorkspaceRepos === undefined ? undefined : { context: `${hostId ?? "local"}:${projectId ?? ""}`, names: [...initialWorkspaceRepos] });
+	const repositoryContext = `${hostId ?? "local"}:${projectId ?? ""}`;
+	const workspaceRepos = repositorySelection?.context === repositoryContext ? repositorySelection.names : undefined;
 	const [model, setModel] = useState("");
 	const [mode, setMode] = useState("");
 	const [effort, setEffort] = useState("");
@@ -216,6 +227,7 @@ export function TaskComposer({
 					headers: input.attachments?.length ? { "X-AO-Attachment-Upload": "1" } : undefined,
 					body: {
 						clientRequestId: input.clientRequestId,
+						...(input.workspaceRepos !== undefined ? { workspaceRepos: input.workspaceRepos } : {}),
 						projectId: input.projectId,
 						brief: input.brief,
 						agent: input.agent,
@@ -308,7 +320,7 @@ export function TaskComposer({
 	});
 	useEffect(() => {
 		const id = projectQuery.data?.id;
-		if (!id) return;
+		if (!id || projectQuery.data?.kind === "workspace") return;
 		let client;
 		try {
 			client = hostId ? clientForHost(hostId) : apiClient;
@@ -337,7 +349,7 @@ export function TaskComposer({
 			taskPreparationRef.current = "";
 			cancelTaskPreparation(token, hostId);
 		};
-	}, [hostId, projectQuery.data?.id]);
+	}, [hostId, projectQuery.data?.id, projectQuery.data?.kind]);
 	const agentsQuery = useAgentReadinessQuery(true, hostId);
 	const { settings, error: settingsError } = useSettings(hostId);
 	// The composer preselects the agent and model a spawn would actually use
@@ -622,7 +634,7 @@ export function TaskComposer({
 		if (!effortTouched) setEffort(defaultEffortForSelectedAgent || cloudDefaultEffort);
 	}, [cloudDefaultEffort, defaultEffortForSelectedAgent, effortTouched]);
 
-	const isDirty = isPromptDirty || modelTouched || effortTouched || attachments.length > 0;
+	const isDirty = workspaceRepos !== undefined || isPromptDirty || modelTouched || effortTouched || attachments.length > 0;
 	const handlePromptChange = useCallback((value: string) => {
 		const nextDirty = value.trim() !== "";
 		setIsPromptDirty((wasDirty) => (wasDirty === nextDirty ? wasDirty : nextDirty));
@@ -649,6 +661,10 @@ export function TaskComposer({
 		setError(undefined);
 		setFallbackAction(undefined);
 		try {
+			if (prepareBrief) {
+				if (isCloudProject || approvalMode === "bypass-permissions") throw new Error("RCP planning requires a local task with approvals enabled.");
+				brief = await prepareBrief(brief, workspaceRepos);
+			}
 			if (!isCloudProject && selectedAgent) {
 				try {
 					cacheAgentReadiness(queryClient, await ensureAgentReadiness([selectedAgent], "launch", hostId), hostId);
@@ -660,6 +676,7 @@ export function TaskComposer({
 			const attachmentPayloads = await toSettledPayload();
 			const submittedPreparation = taskPreparationRef.current;
 			const request: CreateTaskInput = {
+				...(projectQuery.data?.kind === "workspace" && workspaceRepos !== undefined ? { workspaceRepos } : {}),
 				projectId,
 				brief,
 				agent: selectedAgent ? (selectedAgent as CreateTaskInput["agent"]) : undefined,
@@ -716,7 +733,15 @@ export function TaskComposer({
 	};
 
 	return (
+		<>
+		{!isCloudProject && !isStandalone && projectQuery.data?.kind === "workspace" ? (
+			<div className="px-3 pt-2">
+				<WorkspaceRepositoryPicker repositories={projectQuery.data.workspaceRepos ?? []} value={workspaceRepos}
+					onChange={(names) => setRepositorySelection({ context: repositoryContext, names })} disabled={isSubmitting} />
+			</div>
+		) : null}
 		<TaskComposerView
+			initialPrompt={initialPrompt}
 			autoFocusPrompt={autoFocusTitle}
 			canSubmit={canSubmit}
 			onPromptChange={handlePromptChange}
@@ -821,6 +846,7 @@ export function TaskComposer({
 				showFollowAgentAction={Boolean(catalogDefaultOption || !isConcreteModelID(projectModelOrMode))} />}
 			showEffort={!requiresTuiFallback && (effortOptions.length > 0 || Boolean(effort && effort !== "default"))}
 		/>
+		</>
 	);
 }
 

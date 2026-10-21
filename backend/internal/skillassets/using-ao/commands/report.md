@@ -1,5 +1,11 @@
 # ao report
 
+If the shell cannot connect to the local AO daemon, use the AO MCP
+`session_report` tool instead. It reports only for the current harness session
+and returns the saved report ID. Do not change sandbox or network permissions.
+For example, call it with `{"state":"done","note":"Ready for review."}`.
+This AO report does not replace RCP progress and handoff records.
+
 Persist a meaningful worker report for durable delivery to the active project
 orchestrator.
 

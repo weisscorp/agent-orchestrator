@@ -37,7 +37,9 @@ type taskPreparation struct {
 // worktree work. Provider startup and project post-create commands still wait
 // for an explicit Start Task action.
 func (m *Manager) PrepareTaskWorkspace(ctx context.Context, project domain.ProjectRecord) (domain.TaskPreparationToken, error) {
-	if project.ID == "" {
+	// A workspace's child selection is not known until Start Task. Preparing
+	// every registered child here would probe and create unselected repositories.
+	if project.ID == "" || project.Kind.WithDefault() == domain.ProjectKindWorkspace {
 		return "", nil
 	}
 	m.taskPreparationsMu.Lock()
@@ -314,7 +316,7 @@ func (m *Manager) cleanupTaskPreparationRecord(ctx context.Context, rec domain.S
 		// A missing child row makes the parent appear clean when that nested
 		// child is ignored by the parent repo. Preserve the entire preparation
 		// until every possible nested worktree has a durable cleanup handle.
-		if err := m.requireCompletePreparedWorkspaceProject(ctx, project, rows); err != nil {
+		if err := m.requireCompletePreparedWorkspaceProject(ctx, project, rec, rows); err != nil {
 			return err
 		}
 	}
@@ -344,7 +346,7 @@ func (m *Manager) cleanupTaskPreparationRecord(ctx context.Context, rec domain.S
 	return err
 }
 
-func (m *Manager) requireCompletePreparedWorkspaceProject(ctx context.Context, project domain.ProjectRecord, rows []domain.SessionWorktreeRecord) error {
+func (m *Manager) requireCompletePreparedWorkspaceProject(ctx context.Context, project domain.ProjectRecord, rec domain.SessionRecord, rows []domain.SessionWorktreeRecord) error {
 	paths := make(map[string]string, len(rows))
 	for _, row := range rows {
 		paths[row.RepoName] = row.WorktreePath
@@ -353,7 +355,7 @@ func (m *Manager) requireCompletePreparedWorkspaceProject(ctx context.Context, p
 	if rootPath == "" {
 		return fmt.Errorf("prepared workspace project %q has no durable root worktree row; preserving partial worktrees", project.ID)
 	}
-	children, err := m.store.ListWorkspaceRepos(ctx, project.ID)
+	children, err := m.sessionScopeRepos(ctx, project, rec)
 	if err != nil {
 		return err
 	}

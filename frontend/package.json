@@ -25,6 +25,7 @@
 		"build": "npm run package",
 		"prepackage": "npm run build:daemon && npm run build:tmux && npm run browser-runtime:prepare && npm run build:acp-runtime",
 		"package": "electron-forge package",
+		"package:local:mac": "node ./scripts/package-local-mac.mjs",
 		"premake": "npm run build:daemon && npm run build:tmux && npm run browser-runtime:prepare && npm run build:acp-runtime",
 		"make": "electron-forge make",
 		"publish": "npm run build:daemon && npm run build:tmux && npm run browser-runtime:prepare && npm run build:acp-runtime && electron-forge publish",

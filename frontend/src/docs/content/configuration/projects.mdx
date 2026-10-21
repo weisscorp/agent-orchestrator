@@ -16,7 +16,7 @@ Use Project Settings for interactive edits. The CLI's `set-config` command repla
 | Kind | Use it for |
 | --- | --- |
 | Single repository | A normal Git project. Each session gets an isolated worktree. |
-| Workspace | A root repository and its direct child repositories, managed together. |
+| Workspace | A root repository with the child repositories selected for each session. |
 | Scratch | Work in a plain Orchestrator-managed directory without Git branches or pull requests. |
 
 Add and manage projects in the desktop sidebar. The CLI equivalents are:
@@ -67,6 +67,53 @@ The default `defaultBranch: "auto"` resolves each repository separately. Orchest
 Orchestrator does not guess from the checked-out branch, `main`, or `master`. If a repository has no authoritative remote default, or its remotes are ambiguous, spawning fails with `DEFAULT_BRANCH_UNRESOLVED`.
 
 For a single repository or workspace root, set `defaultBranch` explicitly. For a workspace child, configure its primary remote with `checkout.defaultRemote` when needed, then set its cached remote `HEAD` with `git remote set-head`. Orchestrator-created repositories are an exception: Orchestrator records their branch choice when it creates them and backfills the choice for older Orchestrator-created repositories on first resolution.
+
+### Choose repositories for a workspace session
+
+A workspace can contain more repositories than one task needs. Choose the child
+repositories when starting a task or an orchestrator. The workspace root is always
+included. Selecting no children starts a root-only session, which is useful for
+planning before choosing the implementation repositories.
+
+Each selected repository receives its own isolated Git worktree inside the
+session directory. Orchestrator resolves base branches and prepares worktrees
+only for those repositories. An unselected repository with an unavailable remote
+or unresolved default branch does not prevent the session from starting. A
+selected repository still needs a valid base; Orchestrator does not guess one.
+
+The session-creation API accepts `workspaceRepos`, an array of registered child
+repository names. An omitted field keeps the existing all-repositories behavior;
+an explicit empty array selects only the root. Unknown or repeated names are
+rejected before Git preparation. Single-repository and Scratch projects do not
+accept workspace repository selection.
+
+From the CLI, repeat `--workspace-repo` to select children, or use `--root-only`
+without that flag to select none:
+
+```bash
+ao spawn --project <workspace-id> --workspace-repo api --workspace-repo web --name "Task" --prompt "Implement the task"
+ao spawn --project <workspace-id> --kind orchestrator --root-only --name "Planning"
+```
+
+The resolved selection belongs to the session. Retry and recovery reuse that
+selection rather than adding repositories registered later. Orchestrator refuses
+invalid saved scope instead of falling back to every repository. Cleanup uses
+the session's recorded managed worktrees and does not remove unrelated user
+worktrees. Selecting repositories does not authorize the agent to change them:
+the task instructions and normal approval rules still apply.
+
+Starting or opening an already active orchestrator does not change its selection.
+Create a new session or explicitly replace the existing orchestrator to use a
+different selection. Retrying an older failed session keeps that older session's
+scope.
+
+The root worktree contains files committed in the root repository. If your
+workspace instructions are intentionally ignored or untracked, configure
+`agentRulesFile: "AGENTS.md"` to load that file from the original project root
+for workers. Orchestrator sessions use `orchestratorRules` instead: supply their
+standing instructions there, or explicitly direct them to the source instruction
+file. Orchestrator does not copy every untracked file or local credential into
+a new session.
 
 ## Worker and orchestrator roles
 
@@ -172,7 +219,7 @@ For interactive edits, use Project Settings. For a complete CLI reference, use `
 
 ## Choose a workspace or standalone directory
 
-Orchestrator chooses isolation from the project kind. Git projects use worktrees. Workspace projects materialize the root and its child repositories together. Scratch projects use Orchestrator-managed plain directories. There are no `workspace: clone` or `runtime: process` settings in the current configuration.
+Orchestrator chooses isolation from the project kind. Git projects use worktrees. Workspace projects materialize the root and the session's selected child repositories together; omitting a selection retains the all-repositories behavior. Scratch projects use Orchestrator-managed plain directories. There are no `workspace: clone` or `runtime: process` settings in the current configuration.
 
 For work without a project, start a standalone worker:
 

@@ -973,6 +973,10 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	if err != nil {
 		return domain.SessionRecord{}, 0, 0, fmt.Errorf("spawn: %w", err)
 	}
+	cfg.WorkspaceScope, err = m.resolveWorkspaceScope(ctx, project, cfg.WorkspaceRepos)
+	if err != nil {
+		return domain.SessionRecord{}, 0, 0, fmt.Errorf("spawn: %w", err)
+	}
 	standalone := cfg.ProjectID == ""
 	projectKind := project.Kind.WithDefault()
 	if standalone {
@@ -1101,7 +1105,7 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	asyncChat := cfg.Async && mode == domain.SessionModeChat && m.chat != nil && (cfg.Kind == domain.KindOrchestrator || cfg.Kind == domain.KindWorker)
 
 	var prep *taskPreparation
-	if cfg.AutomationRunID == nil && cfg.Branch == "" {
+	if cfg.AutomationRunID == nil && cfg.Branch == "" && projectKind != domain.ProjectKindWorkspace {
 		prep = m.claimTaskPreparation(cfg.TaskPreparation, cfg.ProjectID)
 	}
 	var rec domain.SessionRecord
@@ -1308,7 +1312,7 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 		}
 	}
 	if ws.Path == "" {
-		baseRefs := m.refreshDefaultBranchesBestEffort(ctx, project)
+		baseRefs := m.refreshDefaultBranchesBestEffort(ctx, project, cfg.WorkspaceScope)
 		ws, workspaceProject, err = m.createSessionWorkspace(ctx, project, cfg, id, branch, baseRefs)
 	}
 	if err != nil {
@@ -1527,6 +1531,8 @@ func (m *Manager) Spawn(ctx context.Context, cfg ports.SpawnConfig) (domain.Sess
 	}
 
 	metadata := domain.SessionMetadata{
+		WorkspaceScope:            rec.Metadata.WorkspaceScope,
+		WorkspaceScopeVersion:     rec.Metadata.WorkspaceScopeVersion,
 		Permissions:               rec.Metadata.Permissions,
 		Branch:                    ws.Branch,
 		WorkspacePath:             ws.Path,
@@ -1861,7 +1867,7 @@ type defaultBranchRefreshTarget struct {
 	resolved         ports.WorkspaceDefaultBranch
 }
 
-func (m *Manager) refreshDefaultBranchesBestEffort(ctx context.Context, project domain.ProjectRecord) map[string]string {
+func (m *Manager) refreshDefaultBranchesBestEffort(ctx context.Context, project domain.ProjectRecord, scopes ...*domain.WorkspaceScope) map[string]string {
 	if project.Kind.WithDefault() == domain.ProjectKindScratch {
 		return nil
 	}
@@ -1881,7 +1887,7 @@ func (m *Manager) refreshDefaultBranchesBestEffort(ctx context.Context, project 
 		configuredBranch: project.Config.WorktreeBaseBranch(),
 	}}
 	if project.Kind.WithDefault() == domain.ProjectKindWorkspace {
-		repos, err := m.store.ListWorkspaceRepos(ctx, project.ID)
+		repos, err := m.workspaceScopeRepos(ctx, project, firstWorkspaceScope(scopes))
 		if err != nil {
 			m.logger.Warn("spawn: workspace child repo lookup failed; continuing with root refresh only", "projectID", project.ID, "error", err)
 		} else {
@@ -1971,7 +1977,7 @@ func (m *Manager) createSessionWorkspace(ctx context.Context, project domain.Pro
 	if !ok {
 		return ports.WorkspaceInfo{}, nil, errors.New("workspace project materialization is not supported by workspace adapter")
 	}
-	repos, err := m.store.ListWorkspaceRepos(ctx, project.ID)
+	repos, err := m.workspaceScopeRepos(ctx, project, cfg.WorkspaceScope)
 	if err != nil {
 		return ports.WorkspaceInfo{}, nil, err
 	}
@@ -3687,6 +3693,8 @@ func (m *Manager) relaunchSessionWithPolicyAndGeneration(ctx context.Context, op
 		}
 	}
 	metadata := domain.SessionMetadata{
+		WorkspaceScope:            rec.Metadata.WorkspaceScope,
+		WorkspaceScopeVersion:     rec.Metadata.WorkspaceScopeVersion,
 		Permissions:               rec.Metadata.Permissions,
 		Branch:                    ws.Branch,
 		WorkspacePath:             ws.Path,
@@ -4581,44 +4589,10 @@ func (m *Manager) workspaceProjectRestoreRows(ctx context.Context, project domai
 }
 
 func (m *Manager) workspaceProjectRestoreRowsFromMarkers(ctx context.Context, project domain.ProjectRecord, rec domain.SessionRecord, rows []domain.SessionWorktreeRecord) ([]ports.WorkspaceRepoInfo, error) {
-	if len(rows) > 1 {
-		return m.sessionWorktreeRowsToRepoInfos(ctx, project, rec, rows)
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("workspace session %s has no durable worktree inventory; preserving unknown worktrees", rec.ID)
 	}
-	childRepos, err := m.store.ListWorkspaceRepos(ctx, project.ID)
-	if err != nil {
-		return nil, err
-	}
-	rootPath := rec.Metadata.WorkspacePath
-	rootBranch := rec.Metadata.Branch
-	var rootBaseSHA, rootBaseRef string
-	if len(rows) == 1 && (rows[0].RepoName == "" || rows[0].RepoName == domain.RootWorkspaceRepoName) {
-		rootPath = firstNonEmptyString(rows[0].WorktreePath, rootPath)
-		rootBranch = firstNonEmptyString(rows[0].Branch, rootBranch)
-		rootBaseSHA = rows[0].BaseSHA
-		rootBaseRef = rows[0].BaseRef
-	}
-	out := []ports.WorkspaceRepoInfo{{
-		RepoName:  domain.RootWorkspaceRepoName,
-		RepoPath:  project.Path,
-		Path:      rootPath,
-		Branch:    rootBranch,
-		BaseSHA:   rootBaseSHA,
-		BaseRef:   rootBaseRef,
-		SessionID: rec.ID,
-		ProjectID: rec.ProjectID,
-	}}
-	for _, repo := range childRepos {
-		out = append(out, ports.WorkspaceRepoInfo{
-			RepoName:     repo.Name,
-			RepoPath:     filepath.Join(project.Path, filepath.FromSlash(repo.RelativePath)),
-			Path:         filepath.Join(rootPath, filepath.FromSlash(repo.RelativePath)),
-			Branch:       rootBranch,
-			SessionID:    rec.ID,
-			ProjectID:    rec.ProjectID,
-			RelativePath: repo.RelativePath,
-		})
-	}
-	return out, nil
+	return m.sessionWorktreeRowsToRepoInfos(ctx, project, rec, rows)
 }
 
 func (m *Manager) workspaceProjectRows(ctx context.Context, rec domain.SessionRecord) ([]ports.WorkspaceRepoInfo, bool, error) {
@@ -4626,7 +4600,10 @@ func (m *Manager) workspaceProjectRows(ctx context.Context, rec domain.SessionRe
 	if err != nil {
 		return nil, false, err
 	}
-	if len(rows) <= 1 {
+	if len(rows) == 0 {
+		if rec.Metadata.WorkspaceScopeVersion != 0 || rec.Metadata.WorkspaceScope != nil {
+			return nil, false, fmt.Errorf("workspace session %s has no durable worktree inventory; preserving unknown worktrees", rec.ID)
+		}
 		return nil, false, nil
 	}
 	project, err := m.loadProject(ctx, rec.ProjectID)
@@ -4636,6 +4613,11 @@ func (m *Manager) workspaceProjectRows(ctx context.Context, rec domain.SessionRe
 	if project.Kind.WithDefault() != domain.ProjectKindWorkspace {
 		return nil, false, nil
 	}
+	if rec.Metadata.WorkspaceScope == nil && len(rows) == 1 {
+		if err := m.requireCompletePreparedWorkspaceProject(ctx, project, rec, rows); err != nil {
+			return nil, false, err
+		}
+	}
 	infos, err := m.sessionWorktreeRowsToRepoInfos(ctx, project, rec, rows)
 	if err != nil {
 		return nil, false, err
@@ -4644,7 +4626,12 @@ func (m *Manager) workspaceProjectRows(ctx context.Context, rec domain.SessionRe
 }
 
 func (m *Manager) sessionWorktreeRowsToRepoInfos(ctx context.Context, project domain.ProjectRecord, rec domain.SessionRecord, rows []domain.SessionWorktreeRecord) ([]ports.WorkspaceRepoInfo, error) {
-	childRepos, err := m.store.ListWorkspaceRepos(ctx, project.ID)
+	if rec.Metadata.WorkspaceScope != nil {
+		if err := m.requireCompletePreparedWorkspaceProject(ctx, project, rec, rows); err != nil {
+			return nil, err
+		}
+	}
+	childRepos, err := m.sessionScopeRepos(ctx, project, rec)
 	if err != nil {
 		return nil, err
 	}
@@ -4654,11 +4641,29 @@ func (m *Manager) sessionWorktreeRowsToRepoInfos(ctx context.Context, project do
 		repoPaths[repo.Name] = filepath.Join(project.Path, filepath.FromSlash(repo.RelativePath))
 		relPaths[repo.Name] = repo.RelativePath
 	}
+	rootPath := rec.Metadata.WorkspacePath
+	if rootPath == "" {
+		for _, row := range rows {
+			if row.RepoName == domain.RootWorkspaceRepoName {
+				rootPath = row.WorktreePath
+				break
+			}
+		}
+	}
 	out := make([]ports.WorkspaceRepoInfo, 0, len(rows))
 	for _, row := range rows {
 		repoPath := repoPaths[row.RepoName]
 		if repoPath == "" {
 			return nil, fmt.Errorf("session worktree row %q no longer matches workspace registry", row.RepoName)
+		}
+		if rec.Metadata.WorkspaceScope != nil {
+			expected := rootPath
+			if row.RepoName != domain.RootWorkspaceRepoName {
+				expected = filepath.Join(expected, filepath.FromSlash(relPaths[row.RepoName]))
+			}
+			if expected != "" && filepath.Clean(row.WorktreePath) != filepath.Clean(expected) {
+				return nil, fmt.Errorf("session worktree row %q has unexpected path", row.RepoName)
+			}
 		}
 		out = append(out, ports.WorkspaceRepoInfo{
 			RepoName:     row.RepoName,
@@ -5535,7 +5540,7 @@ func seedRecord(cfg ports.SpawnConfig, projectConfig domain.ProjectConfig, now t
 		// Resolved before this point and persisted here. There is no UPDATE
 		// statement that can change it afterwards.
 		Mode:              domain.NormalizeSessionMode(cfg.RequestedMode),
-		Metadata:          domain.SessionMetadata{Permissions: applySpawnAgentConfig(effectiveAgentConfig(cfg.Harness, cfg.Kind, projectConfig), cfg.AgentConfig).Permissions},
+		Metadata:          domain.SessionMetadata{WorkspaceScope: cfg.WorkspaceScope, WorkspaceScopeVersion: workspaceScopeVersion(cfg.WorkspaceScope), Permissions: applySpawnAgentConfig(effectiveAgentConfig(cfg.Harness, cfg.Kind, projectConfig), cfg.AgentConfig).Permissions},
 		RequestedOutput:   cfg.RequestedOutput,
 		OutputType:        domain.SessionOutputNone,
 		AutoReviewEnabled: projectConfig.AutoReview,
@@ -5795,7 +5800,7 @@ func (m *Manager) buildSystemPrompt(ctx context.Context, kind domain.SessionKind
 	}
 
 	if projectID != "" {
-		workspacePrompt, err := m.workspaceProjectPrompt(ctx, kind, projectID)
+		workspacePrompt, err := m.workspaceProjectPrompt(ctx, kind, projectID, sessionID)
 		if err != nil {
 			return "", err
 		}
@@ -5848,7 +5853,7 @@ func (m *Manager) aoSkillPointer(chat bool) string {
 		"Do not use a built-in visualize skill."
 }
 
-func (m *Manager) workspaceProjectPrompt(ctx context.Context, kind domain.SessionKind, projectID domain.ProjectID) (string, error) {
+func (m *Manager) workspaceProjectPrompt(ctx context.Context, kind domain.SessionKind, projectID domain.ProjectID, sessionIDs ...domain.SessionID) (string, error) {
 	project, err := m.loadProject(ctx, projectID)
 	if err != nil {
 		return "", err
@@ -5856,7 +5861,20 @@ func (m *Manager) workspaceProjectPrompt(ctx context.Context, kind domain.Sessio
 	if project.Kind.WithDefault() != domain.ProjectKindWorkspace {
 		return "", nil
 	}
-	repos, err := m.store.ListWorkspaceRepos(ctx, string(projectID))
+	var repos []domain.WorkspaceRepoRecord
+	if len(sessionIDs) > 0 && sessionIDs[0] != "" {
+		rec, found, readErr := m.store.GetSession(ctx, sessionIDs[0])
+		if readErr != nil {
+			return "", readErr
+		}
+		if found {
+			repos, err = m.sessionScopeRepos(ctx, project, rec)
+		} else {
+			repos, err = m.store.ListWorkspaceRepos(ctx, string(projectID))
+		}
+	} else {
+		repos, err = m.store.ListWorkspaceRepos(ctx, string(projectID))
+	}
 	if err != nil {
 		return "", fmt.Errorf("list workspace repos for prompt: %w", err)
 	}
@@ -6003,7 +6021,7 @@ This project is a multi-repository workspace. Sessions start at the workspace ro
 Repositories:
 %s
 
-When spawning workers, name the repository path or paths they should work in. Work can span multiple repositories, so track deliverables, pull requests, and checks by repository.`, domain.RootWorkspaceRepoName, workspaceRepoList(repos))
+When spawning workers, select each child explicitly with repeatable ao spawn --workspace-repo NAME or use --root-only for workspace coordination alone. Omitted selection includes every registered child. Name the repository path or paths they should work in. Work can span multiple repositories, so track deliverables, pull requests, and checks by repository.`, domain.RootWorkspaceRepoName, workspaceRepoList(repos))
 }
 
 func workspaceWorkerPrompt(repos []domain.WorkspaceRepoRecord) string {

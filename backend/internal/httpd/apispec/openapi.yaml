@@ -4582,6 +4582,67 @@ paths:
       summary: Unpair this phone from the daemon, removing it from the roster
       tags:
       - push
+  /api/v1/rcp/features:
+    get:
+      operationId: listRCPFeatures
+      parameters:
+      - in: query
+        name: productId
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RCPFeaturesResponse'
+          description: OK
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Read a bounded RCP feature catalog without starting work
+      tags:
+      - projects
+  /api/v1/rcp/features/{featureId}:
+    get:
+      operationId: resumeRCPFeature
+      parameters:
+      - in: path
+        name: featureId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RCPContextResponse'
+          description: OK
+        "502":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Bad Gateway
+        "503":
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/APIError'
+          description: Service Unavailable
+      summary: Read the selected RCP feature plan, repositories and recent history
+      tags:
+      - projects
   /api/v1/remote-host/account-token:
     post:
       operationId: issueRemoteHostAccountToken
@@ -15707,6 +15768,12 @@ components:
           type: string
         taskPreparation:
           type: string
+        workspaceRepos:
+          items:
+            type: string
+          type:
+          - "null"
+          - array
       required:
       - projectId
       - brief
@@ -17473,6 +17540,191 @@ components:
           type: integer
       required:
       - pat
+      type: object
+    RCPContextResponse:
+      properties:
+        feature:
+          $ref: '#/components/schemas/RCPFeature'
+        history_total:
+          type: integer
+        history_truncated:
+          type: boolean
+        integrations:
+          items:
+            $ref: '#/components/schemas/RCPIntegration'
+          type: array
+        memories:
+          items:
+            $ref: '#/components/schemas/RCPMemory'
+          type: array
+        repositories:
+          items:
+            $ref: '#/components/schemas/RCPRepository'
+          type: array
+      required:
+      - feature
+      - integrations
+      - repositories
+      - memories
+      - history_total
+      - history_truncated
+      type: object
+    RCPFeature:
+      properties:
+        constraints:
+          items:
+            type: string
+          type: array
+        goal:
+          type: string
+        id:
+          type: string
+        problem:
+          type: string
+        product_id:
+          type: string
+        repositories:
+          items:
+            type: string
+          type: array
+        requirements:
+          items:
+            type: string
+          type: array
+        status:
+          type: string
+        title:
+          type: string
+      required:
+      - id
+      - product_id
+      - title
+      - status
+      - goal
+      - problem
+      - requirements
+      - constraints
+      - repositories
+      type: object
+    RCPFeaturesResponse:
+      properties:
+        features:
+          items:
+            $ref: '#/components/schemas/RCPFeature'
+          type: array
+        repositories:
+          items:
+            $ref: '#/components/schemas/RCPRepository'
+          type: array
+        truncated:
+          type: boolean
+      required:
+      - features
+      - repositories
+      - truncated
+      type: object
+    RCPIntegration:
+      properties:
+        acceptance_criteria:
+          items:
+            type: string
+          type: array
+        completed:
+          items:
+            type: string
+          type: array
+        feature_id:
+          type: string
+        id:
+          type: string
+        objective:
+          type: string
+        owner:
+          type: string
+        remaining:
+          items:
+            type: string
+          type: array
+        repositories:
+          items:
+            type: string
+          type: array
+        status:
+          type: string
+        title:
+          type: string
+      required:
+      - id
+      - feature_id
+      - title
+      - objective
+      - status
+      - owner
+      - repositories
+      - acceptance_criteria
+      - completed
+      - remaining
+      type: object
+    RCPMemory:
+      properties:
+        body:
+          type: string
+        completed:
+          items:
+            type: string
+          type: array
+        created_at:
+          type: string
+        current:
+          type: string
+        id:
+          type: string
+        integration_id:
+          type: string
+        kind:
+          type: string
+        next:
+          items:
+            type: string
+          type: array
+        reason:
+          type: string
+        remaining:
+          items:
+            type: string
+          type: array
+        title:
+          type: string
+        warnings:
+          items:
+            type: string
+          type: array
+      required:
+      - id
+      - kind
+      - integration_id
+      - body
+      - created_at
+      - title
+      - reason
+      - current
+      - completed
+      - remaining
+      - next
+      - warnings
+      type: object
+    RCPRepository:
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+      required:
+      - id
+      - name
+      - url
       type: object
     RegisterPushDeviceRequest:
       properties:
@@ -19513,6 +19765,12 @@ components:
           type: string
         projectId:
           type: string
+        workspaceRepos:
+          items:
+            type: string
+          type:
+          - "null"
+          - array
       required:
       - projectId
       type: object
@@ -19618,6 +19876,12 @@ components:
           - github
           - gitlab
           type: string
+        workspaceRepos:
+          items:
+            type: string
+          type:
+          - "null"
+          - array
       type: object
     SpawnSessionResponse:
       properties:

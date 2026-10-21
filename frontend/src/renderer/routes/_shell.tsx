@@ -993,7 +993,7 @@ function ShellLayout() {
 		void queryClient.invalidateQueries({ queryKey: remoteWorkspaceQueryKey(hostId) });
 		if (selectedProject) void navigate({ to: "/" });
 	}, [navigate, queryClient, remoteWorkspaces, routeParams.hostId, routeParams.projectId, routeParams.sessionId]);
-	const openRemoteProjectOrchestrator = useCallback(async (hostId: string, projectId: string) => {
+	const openRemoteProjectOrchestrator = useCallback(async (hostId: string, projectId: string, workspaceRepos?: string[]) => {
 		const workspace = remoteWorkspaces.find((item) => item.hostId === hostId && item.id === projectId);
 		if (!workspace) return;
 		const projectKey = sessionUiKey(projectId, hostId);
@@ -1005,7 +1005,7 @@ function ShellLayout() {
 		}
 		setOrchestratorStartupError(projectId, null, hostId);
 		try {
-			const sessionId = await openRemoteOrchestrator(hostId, projectId, newestActiveOrchestrator(workspace.sessions));
+			const sessionId = await openRemoteOrchestrator(hostId, projectId, newestActiveOrchestrator(workspace.sessions), undefined, false, "sidebar", workspaceRepos);
 			await queryClient.invalidateQueries({ queryKey: remoteWorkspaceQueryKey(hostId) });
 			void navigate(sessionNavigateTarget(projectId, sessionId, hostId));
 		} catch (cause) {
@@ -1426,7 +1426,7 @@ function ShellLayout() {
 						onCreateRemoteProject={createRemoteProject}
 						onInitializeRemoteProject={initializeRemoteProject}
 						onOpenRemoteProject={(hostId, projectId) => { void navigate(projectNavigateTarget(projectId, hostId)); }}
-						onOpenRemoteOrchestrator={(hostId, projectId) => { void openRemoteProjectOrchestrator(hostId, projectId); }}
+						onOpenRemoteOrchestrator={(hostId, projectId, names) => { void openRemoteProjectOrchestrator(hostId, projectId, names); }}
 						onConfigureRemoteProject={(hostId, projectId) => openProjectSettings(projectId, hostId)}
 						onRemoveRemoteProject={removeRemoteProject}
 						onRetryRemoteHosts={() => {

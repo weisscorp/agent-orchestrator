@@ -20,6 +20,8 @@ import (
 const maxDisplayNameLen = 100
 
 type spawnOptions struct {
+	workspaceRepos  []string
+	rootOnly        bool
 	project         string
 	standalone      bool
 	harness         string
@@ -41,19 +43,20 @@ type spawnOptions struct {
 // spawnRequest mirrors the daemon's SpawnSessionRequest body for
 // POST /api/v1/sessions. The CLI keeps its own copy so it need not import httpd.
 type spawnRequest struct {
-	ProjectID       string `json:"projectId,omitempty"`
-	IssueID         string `json:"issueId,omitempty"`
-	ParentSessionID string `json:"parentSessionId,omitempty"`
-	TrackerProvider string `json:"trackerProvider,omitempty"`
-	Kind            string `json:"kind,omitempty"`
-	Mode            string `json:"mode,omitempty"`
-	Harness         string `json:"harness,omitempty"`
-	Branch          string `json:"branch,omitempty"`
-	Prompt          string `json:"prompt,omitempty"`
-	Model           string `json:"model,omitempty"`
-	Effort          string `json:"effort,omitempty"`
-	RequestedOutput string `json:"requestedOutput,omitempty"`
-	DisplayName     string `json:"displayName"`
+	WorkspaceRepos  *[]string `json:"workspaceRepos,omitempty"`
+	ProjectID       string    `json:"projectId,omitempty"`
+	IssueID         string    `json:"issueId,omitempty"`
+	ParentSessionID string    `json:"parentSessionId,omitempty"`
+	TrackerProvider string    `json:"trackerProvider,omitempty"`
+	Kind            string    `json:"kind,omitempty"`
+	Mode            string    `json:"mode,omitempty"`
+	Harness         string    `json:"harness,omitempty"`
+	Branch          string    `json:"branch,omitempty"`
+	Prompt          string    `json:"prompt,omitempty"`
+	Model           string    `json:"model,omitempty"`
+	Effort          string    `json:"effort,omitempty"`
+	RequestedOutput string    `json:"requestedOutput,omitempty"`
+	DisplayName     string    `json:"displayName"`
 }
 
 type spawnResult struct {
@@ -163,7 +166,15 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 					return err
 				}
 			}
+			var selected *[]string
+			if opts.rootOnly {
+				empty := []string{}
+				selected = &empty
+			} else if cmd.Flags().Changed("workspace-repo") {
+				selected = &opts.workspaceRepos
+			}
 			req := spawnRequest{
+				WorkspaceRepos:  selected,
 				ProjectID:       opts.project,
 				IssueID:         opts.issue,
 				ParentSessionID: strings.TrimSpace(os.Getenv("AO_SESSION_ID")),
@@ -221,6 +232,9 @@ func newSpawnCommand(ctx *commandContext) *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
+	f.StringArrayVar(&opts.workspaceRepos, "workspace-repo", nil, "Workspace child repository name to include (repeat for several; omitted includes all)")
+	f.BoolVar(&opts.rootOnly, "root-only", false, "Include only the workspace root, without child repositories")
+	cmd.MarkFlagsMutuallyExclusive("workspace-repo", "root-only")
 	// --agent is an alias for --harness so the more intuitive `ao spawn --agent
 	// droid` works identically; both resolve to the same harness flag.
 	f.SetNormalizeFunc(func(_ *pflag.FlagSet, name string) pflag.NormalizedName {

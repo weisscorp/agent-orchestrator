@@ -193,6 +193,15 @@ func (m *Manager) recoverTaskNaming(ctx context.Context, rec domain.SessionRecor
 	if !ok || rec.ProjectID == "" || rec.IsTerminated || rec.IsTaskPreparation || rec.Metadata.RuntimeHandleID != "" || rec.Metadata.ProviderConversationID != "" {
 		return ports.WorkspaceProjectInfo{}, false, nil
 	}
+	if rec.Metadata.WorkspaceScopeVersion != 0 || rec.Metadata.WorkspaceScope != nil {
+		project, err := m.loadProject(ctx, rec.ProjectID)
+		if err != nil {
+			return ports.WorkspaceProjectInfo{}, false, err
+		}
+		if _, err := m.sessionScopeRepos(ctx, project, rec); err != nil {
+			return ports.WorkspaceProjectInfo{}, false, err
+		}
+	}
 	info, found, err := recovery.RecoverTaskWorkspace(ctx, rec.ProjectID, rec.ID)
 	if !found || err != nil {
 		return info, found, err

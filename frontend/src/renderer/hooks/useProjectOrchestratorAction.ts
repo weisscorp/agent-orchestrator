@@ -20,6 +20,8 @@ import { sessionUiKey } from "../lib/hosts";
 import { sessionNavigateTarget } from "../lib/navigate-to-session";
 import { useConnectedHosts } from "./useHostConnection";
 
+type OrchestratorLaunch = { mode?: "tui"; workspaceRepos?: string[] };
+
 export function useProjectOrchestratorAction({
 	projectId,
 	project,
@@ -67,7 +69,8 @@ export function useProjectOrchestratorAction({
 	}, [hostId, projectId, orchestrator, startupError, setStartupError]);
 	const mutations = useMutationState({
 		filters: { mutationKey, exact: true },
-		select: (mutation) => ({ status: mutation.state.status, error: mutation.state.error }),
+		select: (mutation) => ({ status: mutation.state.status, error: mutation.state.error,
+			launch: mutation.state.variables as OrchestratorLaunch | undefined }),
 	});
 	const isSpawning = mutations.some((mutation) => mutation.status === "pending");
 	const resumableOrchestrator =
@@ -81,7 +84,7 @@ export function useProjectOrchestratorAction({
 	);
 	const mutation = useMutation({
 		mutationKey,
-		mutationFn: async (mode?: "tui") => {
+		mutationFn: async ({ mode, workspaceRepos }: OrchestratorLaunch) => {
 			if (!projectId) return;
 			setStartupError(projectId, null, hostId);
 			// A known orchestrator opens at once; its composer shows the startup
@@ -91,12 +94,12 @@ export function useProjectOrchestratorAction({
 				void navigate(sessionNavigateTarget(projectId, resumableOrchestrator.id, hostId));
 			}
 			const openedSessionId = hostId
-				? await openRemoteOrchestrator(hostId, projectId, orchestrator, mode, false, source)
+				? await openRemoteOrchestrator(hostId, projectId, orchestrator, mode, false, source, workspaceRepos)
 				: resumableOrchestrator
 				? (await earlyResume, resumableOrchestrator.id)
 				: project?.kind === CLOUD_PROJECT_KIND
 					? await spawnCloudOrchestrator(queryClient, projectId)
-					: await spawnOrchestrator(projectId, source, false, mode);
+					: await spawnOrchestrator(projectId, source, false, mode, undefined, undefined, workspaceRepos);
 			await queryClient.invalidateQueries({
 				queryKey: project?.kind === CLOUD_PROJECT_KIND ? cloudSessionsQueryKey : workspaceQueryKeyForHost(hostId),
 			});
@@ -114,11 +117,12 @@ export function useProjectOrchestratorAction({
 			});
 		},
 	});
-	const openOrchestrator = (mode?: "tui") => {
+	const openOrchestrator = (mode?: "tui", workspaceRepos?: string[]) => {
 		if (!projectId || !hostConnected || isProjectRestarting || isProvisioning) return;
 		// Read the cache synchronously as well as disabling both rendered copies.
 		// Two clicks in the same render must still produce just one request.
 		if (queryClient.isMutating({ mutationKey, exact: true })) return;
+		const launch = { mode, workspaceRepos };
 		void addRendererExceptionStep("Orchestrator open requested", {
 			source: "orchestrator-open", operation: "open_orchestrator",
 			surface: sessionId ? "session_detail" : "project_board", project_id: projectId,
@@ -127,19 +131,22 @@ export function useProjectOrchestratorAction({
 		if (hostId && projectId && !orchestrator && project && !hasConfiguredOrchestratorAgent(project)) {
 			useUiStore.getState().openProjectSettings(projectId, hostId);
 		} else if (resumableOrchestrator) {
-			mutation.mutate(mode);
+			mutation.mutate(launch);
 		} else if (orchestrator) {
 			void navigate(sessionNavigateTarget(projectId, orchestrator.id, hostId));
 		} else if (project?.kind !== CLOUD_PROJECT_KIND && !hasConfiguredOrchestratorAgent(project)) {
 			if (project) useUiStore.getState().openProjectSettings(projectId, hostId);
 		} else {
-			mutation.mutate(mode);
+			mutation.mutate(launch);
 		}
 	};
 	const openNewTask = () => {
 		if (projectId && hostConnected && !isProjectRestarting && !isProvisioning) useUiStore.getState().requestNewTask(projectId, hostId);
 	};
 	return { projectId, orchestrator, isSpawning, isProjectRestarting, isProvisioning, spawnError,
+		// A failed start replaces and remounts the board. Restore its visible
+		// selection from the shared mutation so the retry sends what the UI shows.
+		...(latest?.status === "error" ? { lastWorkspaceRepos: latest.launch?.workspaceRepos } : {}),
 		canCreateAsTui: isChatPreflightError(error), openOrchestrator, openNewTask };
 }
 

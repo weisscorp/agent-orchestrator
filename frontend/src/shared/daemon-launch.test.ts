@@ -24,6 +24,20 @@ describe("resolveDaemonLaunch", () => {
 		});
 	});
 
+	it("uses a filesystem directory for configured commands in packaged apps", () => {
+		const command = '"/opt/custom ao/ao" daemon --port 3001';
+		expect(
+			resolveDaemonLaunch(
+				{ AO_DAEMON_COMMAND: command },
+				true,
+				"/Applications/AO.app/Contents/Resources",
+				"/Applications/AO.app/Contents/Resources/app.asar",
+				"/home/user",
+				"darwin",
+			),
+		).toEqual({ command, args: [], cwd: "/home/user/.ao", shell: true, source: "configured" });
+	});
+
 	it("uses the prebuilt daemon exe in Windows dev", () => {
 		expect(resolveDaemonLaunch({}, false, "/resources", "C:\\repo\\frontend", "C:\\Users\\alice", "win32")).toEqual({
 			command: "C:\\repo\\frontend/daemon/ao.exe",

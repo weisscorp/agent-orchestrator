@@ -1,8 +1,21 @@
 import { app, dialog, shell } from "electron";
 import semver from "semver";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 
-const FLOOR_URL =
-  "https://raw.githubusercontent.com/Untrivial-ai/agent-orchestrator/main/desktop-version-floor.json";
+// Read the same build-time repository identity as electron-updater. Never
+// redirect a fork to upstream when its release configuration is unavailable.
+function releaseRepository(): string | null {
+  try {
+    const yml = readFileSync(path.join(process.resourcesPath, "app-update.yml"), "utf8");
+    const owner = /^owner:\s*(.+)$/m.exec(yml)?.[1]?.trim();
+    const repo = /^repo:\s*(.+)$/m.exec(yml)?.[1]?.trim();
+    return owner && repo && /^[A-Za-z0-9_-]+$/.test(owner) && /^[A-Za-z0-9_.-]+$/.test(repo)
+      && repo !== "." && repo !== ".." ? `${owner}/${repo}` : null;
+  } catch {
+    return null;
+  }
+}
 
 const FETCH_TIMEOUT_MS = 10_000;
 
@@ -12,8 +25,6 @@ type Floor = {
   downloadUrl?: string;
 };
 
-const DEFAULT_DOWNLOAD_URL =
-  "https://github.com/Untrivial-ai/agent-orchestrator/releases/latest";
 
 function usableVersion(v: string | null | undefined): string | null {
   const trimmed = v?.trim();
@@ -31,9 +42,13 @@ function isBelow(running: string, floor: string): boolean {
 
 export async function checkDesktopVersionFloor(): Promise<void> {
   if (!app.isPackaged) return;
+  const repo = releaseRepository();
+  if (!repo) return;
+  const floorUrl = `https://raw.githubusercontent.com/${repo}/main/desktop-version-floor.json`;
+  const defaultDownloadUrl = `https://github.com/${repo}/releases/latest`;
   let floor: Floor;
   try {
-    const response = await fetch(FLOOR_URL, {
+    const response = await fetch(floorUrl, {
       cache: "no-store",
       headers: {
         "User-Agent": `ao-desktop/${app.getVersion()}`,
@@ -48,8 +63,8 @@ export async function checkDesktopVersionFloor(): Promise<void> {
   }
 
   const running = app.getVersion();
-  const rawUrl = floor.downloadUrl || DEFAULT_DOWNLOAD_URL;
-  const downloadUrl = rawUrl.startsWith("https://github.com/") ? rawUrl : DEFAULT_DOWNLOAD_URL;
+  const rawUrl = floor.downloadUrl || defaultDownloadUrl;
+  const downloadUrl = rawUrl.startsWith(`https://github.com/${repo}/releases/`) ? rawUrl : defaultDownloadUrl;
   const minVersion = usableVersion(floor.min);
   const latestVersion = usableVersion(floor.latest);
 

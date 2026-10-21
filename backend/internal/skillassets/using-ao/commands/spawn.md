@@ -23,6 +23,8 @@ ao spawn [flags]
 | `--mode chat\|tui` | Initial session interface; Chat requires harness support | Daemon default, otherwise Terminal UI |
 | `--output artifact` | Ask the worker for a file in its artifact directory instead of a PR | Ordinary task |
 | `--no-takeover` | Refuse if another active session owns the claimed PR (requires `--claim-pr`) | - |
+| `--workspace-repo name` | Include only this workspace child repository; repeat for several | Omitted includes all registered children |
+| `--root-only` | Include only the workspace root; excludes children | Mutually exclusive with `--workspace-repo` |
 | `--project string` | Project id to spawn the session in | Optional when `--standalone` is used; defaults to `AO_PROJECT_ID` or the current repo's registered project |
 | `--standalone` | Spawn a projectless worker session in an AO-managed directory | Disabled when `--project` is set |
 | `--prompt string` | Initial prompt for the agent | - |
@@ -71,3 +73,12 @@ ao spawn --standalone --agent claude-code --output artifact --name "q3-report" \
 ao spawn --project my-gitlab-app --issue 42 --tracker-provider gitlab \
   --name "fix-issue-42" --prompt "Fix GitLab issue 42."
 ```
+
+For workspace projects, select child names explicitly when coordinating bounded work:
+
+```bash
+ao spawn --project platform --name api-fix --workspace-repo api --prompt "Fix the API"
+ao spawn --project platform --kind orchestrator --name coordinate --root-only
+```
+
+The workspace root is always included. Repository selection is pinned when the session is created and survives retries and restarts; registering more children does not add them to an existing session. These flags require a workspace project and apply equally to workers and orchestrators. All selected repositories still use AO-managed isolated worktrees.

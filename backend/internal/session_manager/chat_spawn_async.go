@@ -121,16 +121,6 @@ func (m *Manager) completeAsyncChatSpawn(ctx context.Context, in asyncChatSpawn)
 	reusePublishedWorkspace := in.retry && in.record.Metadata.WorkspacePath != ""
 	plan := provisionPlan(in, reusePublishedWorkspace)
 	progress := m.startProvisionProgress(ctx, id, plan)
-	if reusePublishedWorkspace {
-		ws = workspaceInfo(in.record)
-		if in.projectKind == domain.ProjectKindWorkspace {
-			var rows []ports.WorkspaceRepoInfo
-			rows, _, err = m.workspaceProjectRows(ctx, in.record)
-			if err == nil {
-				workspaceProject = &ports.WorkspaceProjectInfo{Root: ws, Worktrees: rows}
-			}
-		}
-	}
 	if in.preparation != nil {
 		ws, workspaceProject, err = m.awaitTaskPreparation(ctx, in.preparation)
 		if err != nil && ctx.Err() != nil {
@@ -157,15 +147,36 @@ func (m *Manager) completeAsyncChatSpawn(ctx context.Context, in asyncChatSpawn)
 			return
 		}
 		if recovered {
+			// Naming publishes the root before its individual ownership rows.
+			// Recover that journal first, then validate the repaired durable rows
+			// against the newly published root rather than the stale retry input.
+			in.record, err = m.getRecord(ctx, id)
+			if err != nil {
+				m.failAsyncChatSpawn(ctx, id, err)
+				return
+			}
 			ws = info.Root
 			reusePublishedWorkspace = true
-			if in.projectKind == domain.ProjectKindWorkspace {
-				workspaceProject = &info
+		}
+	}
+	if reusePublishedWorkspace {
+		if ws.Path == "" {
+			ws = workspaceInfo(in.record)
+		}
+		if in.projectKind == domain.ProjectKindWorkspace {
+			var rows []ports.WorkspaceRepoInfo
+			rows, _, err = m.workspaceProjectRows(ctx, in.record)
+			if err != nil {
+				// A retry does not own newly created work here. Preserve the
+				// published workspace when no journal can repair its inventory.
+				m.failAsyncChatSpawn(ctx, id, wrapSpawnStage(id, ErrWorkspaceCreate, err))
+				return
 			}
+			workspaceProject = &ports.WorkspaceProjectInfo{Root: ws, Worktrees: rows}
 		}
 	}
 	if ws.Path == "" {
-		baseRefs := m.refreshDefaultBranchesBestEffort(ctx, in.project)
+		baseRefs := m.refreshDefaultBranchesBestEffort(ctx, in.project, in.cfg.WorkspaceScope)
 		m.logAsyncChatSpawnStage(id, "default_branch_refresh", stageStarted)
 		progress.complete(ctx, domain.SessionProvisionStepFetch)
 		stageStarted = time.Now()
@@ -506,8 +517,13 @@ func (m *Manager) retryFailedChatSpawn(ctx context.Context, rec domain.SessionRe
 	if rec.Metadata.Permissions != "" {
 		config.Permissions = rec.Metadata.Permissions
 	}
+	scope, err := m.retryWorkspaceScope(ctx, project, rec)
+	if err != nil {
+		return RestoreResult{}, false, err
+	}
 	cfg := ports.SpawnConfig{
-		ProjectID: rec.ProjectID, IssueID: rec.IssueID, Kind: rec.Kind,
+		WorkspaceScope: scope,
+		ProjectID:      rec.ProjectID, IssueID: rec.IssueID, Kind: rec.Kind,
 		Harness: rec.Harness, RequestedMode: domain.SessionModeChat,
 		AgentConfig: config, AgentConfigResolved: true, Async: true,
 	}

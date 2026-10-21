@@ -388,6 +388,53 @@ func TestSpawnResolvesProjectFromEnvAndDefaultAgent(t *testing.T) {
 	}
 }
 
+func TestSpawnWorkspaceSelectionFlags(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		flags []string
+		want  string
+	}{
+		{"omitted", nil, ""},
+		{"root only", []string{"--root-only"}, "[]"},
+		{"selected", []string{"--workspace-repo", "api", "--workspace-repo", "web"}, `["api","web"]`},
+		{"orchestrator", []string{"--kind", "orchestrator", "--root-only"}, "[]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := setConfigEnv(t)
+			var body map[string]json.RawMessage
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/demo":
+					_, _ = io.WriteString(w, `{"project":{"id":"demo","kind":"workspace","path":"/repo/demo","config":{"worker":{"agent":"codex"},"orchestrator":{"agent":"codex"}}}}`)
+				case r.Method == http.MethodPost && r.URL.Path == "/api/v1/sessions":
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Fatal(err)
+					}
+					_, _ = io.WriteString(w, `{"session":{"id":"demo-1","status":"idle"}}`)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(srv.Close)
+			writeRunFileFor(t, cfg, srv)
+			t.Setenv("AO_PROJECT_ID", "demo")
+			args := append([]string{"spawn", "--name", "scoped", "--skip-agent-check"}, tc.flags...)
+			_, stderr, err := executeCLI(t, Deps{ProcessAlive: func(int) bool { return true }}, args...)
+			if err != nil {
+				t.Fatalf("spawn: %v %s", err, stderr)
+			}
+			if got := string(body["workspaceRepos"]); got != tc.want {
+				t.Fatalf("workspaceRepos=%s want=%s", got, tc.want)
+			}
+		})
+	}
+	_, _, err := executeCLI(t, Deps{}, "spawn", "--name", "scoped", "--root-only", "--workspace-repo", "api")
+	if err == nil {
+		t.Fatal("accepted mutually exclusive repository flags")
+	}
+}
+
 func TestSpawnResolvesProjectFromAOSessionID(t *testing.T) {
 	cfg := setConfigEnv(t)
 	var requests []string
