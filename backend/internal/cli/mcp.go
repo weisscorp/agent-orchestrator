@@ -15,10 +15,10 @@ import (
 )
 
 // `ao mcp` is the stdio MCP server AO passes to every chat session, so the
-// agent sees html_preview and html_render in its tool list. The agent's
+// agent sees HTML tools and session_report in its tool list. The agent's
 // harness spawns it outside the shell sandbox, so it reaches the loopback
 // daemon even when the agent's own shell commands cannot. Hand-written, and
-// only what these two tools need: newline-delimited JSON-RPC 2.0, one request
+// only what these tools need: newline-delimited JSON-RPC 2.0, one request
 // at a time, nothing on stdout but replies.
 
 const (
@@ -128,6 +128,8 @@ func (c *commandContext) handleMCP(ctx context.Context, line []byte) *mcpRespons
 			resp.Result = c.callHTMLPreview(ctx, p.Arguments)
 		case "html_render":
 			resp.Result = c.callHTMLRender(ctx, p.Arguments)
+		case "session_report":
+			resp.Result = c.callSessionReport(ctx, p.Arguments)
 		default:
 			resp.Error = &mcpError{Code: -32602, Message: fmt.Sprintf("unknown tool %q", p.Name)}
 		}
@@ -248,6 +250,22 @@ var mcpHTMLSchema = map[string]any{
 
 var mcpTools = []map[string]any{
 	{
+		"name": "session_report", "title": "Report to orchestrator",
+		"description": "Send progress or completion to the AO orchestrator for this session only. Use this tool when the shell cannot reach the local daemon; do not relax sandbox or network permissions. Choose either message, or state with note, optionally with outputs. Text is limited to 1000 characters. Success returns the stored report ID. This does not write RCP progress or handoff records.",
+		"inputSchema": map[string]any{
+			"type": "object", "additionalProperties": false,
+			"properties": map[string]any{
+				"message":     map[string]any{"type": "string", "maxLength": 1000},
+				"state":       map[string]any{"type": "string", "enum": []string{"checkpoint", "needs_input", "stuck", "done"}},
+				"note":        map[string]any{"type": "string", "maxLength": 1000},
+				"artifacts":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"prsCreated":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+				"prsReviewed": map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+			},
+		},
+		"annotations": map[string]any{"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false},
+	},
+	{
 		"name":  "html_preview",
 		"title": "Preview HTML",
 		"description": "Load an HTML page in the AO desktop app the way readers see it. Returns a PNG screenshot, " +
@@ -303,4 +321,54 @@ var mcpTools = []map[string]any{
 			"title": "Render HTML", "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": true,
 		},
 	},
+}
+
+// Session identity is supplied by the harness, never by tool arguments.
+func (c *commandContext) callSessionReport(ctx context.Context, raw json.RawMessage) map[string]any {
+	var args struct {
+		Message     string   `json:"message"`
+		State       string   `json:"state"`
+		Note        *string  `json:"note"`
+		Artifacts   []string `json:"artifacts"`
+		PRsCreated  []string `json:"prsCreated"`
+		PRsReviewed []string `json:"prsReviewed"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&args); err != nil {
+		return mcpToolError(fmt.Errorf("invalid arguments: %w", err))
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return mcpToolError(errors.New("invalid arguments: expected one object"))
+	}
+	o := reportOptions{artifacts: args.Artifacts, prsCreated: args.PRsCreated, prsReviewed: args.PRsReviewed}
+	if args.Note != nil {
+		o.note, o.noteSet = *args.Note, true
+	}
+	switch args.State {
+	case "":
+	case "checkpoint":
+		o.checkpoint = true
+	case "needs_input":
+		o.needsInput = true
+	case "stuck":
+		o.stuck = true
+	case "done":
+		o.done = true
+	default:
+		return mcpToolError(errors.New("invalid state: use checkpoint, needs_input, stuck, or done"))
+	}
+	var message []string
+	if args.Message != "" {
+		message = []string{args.Message}
+	}
+	var response reportAPIResponse
+	if err := c.submitReport(ctx, message, o, &response); err != nil {
+		return mcpToolError(err)
+	}
+	if response.ID == "" {
+		return mcpToolError(errors.New("daemon returned no report ID; delivery is unconfirmed, inspect reports before retrying"))
+	}
+	return map[string]any{"content": []any{mcpText("Report saved: " + response.ID)}}
 }

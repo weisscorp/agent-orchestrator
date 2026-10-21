@@ -220,6 +220,8 @@ func TestBuildSystemPrompt_WorkerRequiresDurableReports(t *testing.T) {
 	for _, want := range []string{
 		"## Worker Reports",
 		"ao report --checkpoint --note <text>",
+		"session_report",
+		"Do not relax sandbox or network permissions",
 		"ao report --needs-input --note <text>",
 		"ao report --stuck --note <text>",
 		"ao report --done --note <text>",

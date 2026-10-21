@@ -2,7 +2,9 @@ package cli
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -79,11 +81,15 @@ func TestMCPInitializeNegotiatesTheProtocolVersion(t *testing.T) {
 	}
 }
 
-func TestMCPListsBothTools(t *testing.T) {
+func TestMCPListsTools(t *testing.T) {
 	tools := runMCP(t, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)[0].Result.Tools
-	if len(tools) != 2 || tools[0].Name != "html_preview" || tools[1].Name != "html_render" {
+	if len(tools) != 3 || tools[0].Name != "session_report" || tools[1].Name != "html_preview" || tools[2].Name != "html_render" {
 		t.Fatalf("tools = %+v", tools)
 	}
+	if got := tools[0].Annotations; got["readOnlyHint"] != false || got["idempotentHint"] != false || got["openWorldHint"] != false {
+		t.Fatalf("session_report annotations = %v", got)
+	}
+	tools = tools[1:]
 	for _, tool := range tools {
 		// html_render can write an artifact file, so only html_preview is read-only.
 		preview := tool.Name == "html_preview"
@@ -269,4 +275,120 @@ func TestMCPProtocolErrors(t *testing.T) {
 			t.Errorf("reply %d = id %s error %+v, want id %s code %d", i, got.ID, got.Error, want.id, want.code)
 		}
 	}
+}
+
+func TestMCPSessionReportPersistsHarnessSession(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+		want reportAPIRequest
+	}{
+		{"message", map[string]any{"message": "Tests pass"}, reportAPIRequest{SessionID: "aa-47", Message: "Tests pass"}},
+		{"done with outputs", map[string]any{"state": "done", "note": "Ready for review", "artifacts": []string{"artifact-ref"}, "prsCreated": []string{"https://github.com/acme/repo/pull/1"}, "prsReviewed": []string{"https://github.com/acme/repo/pull/2"}}, reportAPIRequest{SessionID: "aa-47", State: "done", Note: "Ready for review", Outputs: []reportAPIOutput{{Kind: "artifact", Reference: "artifact-ref"}, {Kind: "pr_created", Reference: "https://github.com/acme/repo/pull/1"}, {Kind: "pr_reviewed", Reference: "https://github.com/acme/repo/pull/2"}}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AO_SESSION_ID", "aa-47")
+			cfg := setConfigEnv(t)
+			srv, capture := reportMCPServer(t, http.StatusCreated, `{"id":"report-1"}`)
+			writeRunFileFor(t, cfg, srv)
+			reply := runMCP(t, mcpCall("session_report", tc.args))[0]
+			if reply.Error != nil || reply.Result.IsError || len(reply.Result.Content) != 1 || reply.Result.Content[0].Text != "Report saved: report-1" {
+				t.Fatalf("reply = %+v", reply)
+			}
+			if capture.method != http.MethodPost || capture.path != "/api/v1/reports" {
+				t.Fatalf("request %s %s", capture.method, capture.path)
+			}
+			var got reportAPIRequest
+			if err := json.Unmarshal([]byte(capture.body), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.SessionID != tc.want.SessionID || got.State != tc.want.State || got.Note != tc.want.Note || got.Message != tc.want.Message || !slices.Equal(got.Outputs, tc.want.Outputs) {
+				t.Fatalf("request %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMCPSessionReportRejectsInvalidArgumentsBeforeHTTP(t *testing.T) {
+	t.Setenv("AO_SESSION_ID", "aa-47")
+	cfg := setConfigEnv(t)
+	srv, capture := reportMCPServer(t, http.StatusCreated, `{"id":"unexpected"}`)
+	writeRunFileFor(t, cfg, srv)
+	cases := []struct {
+		name string
+		args map[string]any
+	}{
+		{"empty", map[string]any{}},
+		{"session spoof", map[string]any{"sessionId": "other-1", "message": "hello"}},
+		{"snake session spoof", map[string]any{"session_id": "other-1", "message": "hello"}},
+		{"URL override", map[string]any{"url": "https://example.com", "message": "hello"}},
+		{"invalid state", map[string]any{"state": "working", "note": "hello"}},
+		{"missing note", map[string]any{"state": "done"}},
+		{"empty note", map[string]any{"state": "done", "note": " "}},
+		{"note without state", map[string]any{"note": "hello"}},
+		{"mixed message", map[string]any{"message": "hello", "state": "done", "note": "ok"}},
+		{"too long", map[string]any{"message": strings.Repeat("я", 1001)}},
+		{"bad type", map[string]any{"message": 42}},
+		{"empty output", map[string]any{"artifacts": []string{" "}}},
+		{"invalid PR", map[string]any{"prsCreated": []string{"not-a-pr"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			capture.called = false
+			reply := runMCP(t, mcpCall("session_report", tc.args))[0]
+			if reply.Error != nil || !reply.Result.IsError || len(reply.Result.Content) != 1 || reply.Result.Content[0].Text == "" || capture.called {
+				t.Fatalf("reply %+v, daemon called=%v", reply, capture.called)
+			}
+		})
+	}
+	t.Setenv("AO_SESSION_ID", " ")
+	reply := runMCP(t, mcpCall("session_report", map[string]any{"message": "hello"}))[0]
+	if !reply.Result.IsError || !strings.Contains(reply.Result.Content[0].Text, "AO_SESSION_ID is required") || capture.called {
+		t.Fatalf("missing env reply %+v called=%v", reply, capture.called)
+	}
+}
+
+func TestMCPSessionReportDoesNotFabricateDelivery(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     int
+		body, want string
+	}{
+		{"daemon error", http.StatusBadRequest, `{"message":"session not found","code":"SESSION_NOT_FOUND","requestId":"q1"}`, "session not found (SESSION_NOT_FOUND) [request q1]"},
+		{"missing ID", http.StatusCreated, `{}`, "delivery is unconfirmed"},
+		{"malformed response", http.StatusCreated, `not json`, "decode"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AO_SESSION_ID", "aa-47")
+			cfg := setConfigEnv(t)
+			srv, _ := reportMCPServer(t, tc.status, tc.body)
+			writeRunFileFor(t, cfg, srv)
+			reply := runMCP(t, mcpCall("session_report", map[string]any{"message": "hello"}))[0]
+			if reply.Error != nil || !reply.Result.IsError || len(reply.Result.Content) != 1 || !strings.Contains(reply.Result.Content[0].Text, tc.want) {
+				t.Fatalf("reply %+v want %s", reply, tc.want)
+			}
+		})
+	}
+}
+
+func reportMCPServer(t *testing.T, status int, body string) (*httptest.Server, *previewCapture) {
+	t.Helper()
+	capture := &previewCapture{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/reports" {
+			http.NotFound(w, r)
+			return
+		}
+		payload, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read report: %v", err)
+			return
+		}
+		capture.called, capture.method, capture.path, capture.body = true, r.Method, r.URL.Path, string(payload)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		_, _ = io.WriteString(w, body)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, capture
 }
