@@ -200,3 +200,26 @@ candidate on isolated Macs or VMs, on Apple Silicon and Intel:
 
 Test the normal old-version-to-candidate update path too. A repair download is
 only necessary for affected installs that cannot complete that path.
+
+## Local Apple Silicon fork build
+
+For a source-built local app without a Developer ID certificate, use
+`cd frontend && AO_RELEASE_REPO=owner/fork npm run package:local:mac`.
+This builds a fresh arm64 bundle and applies the final ad-hoc seal after
+Forge has finished updating Info.plist. It preserves the bundle's existing
+entitlements and flags. It does not add library-validation exceptions or
+change Gatekeeper, quarantine, SIP, or system signing policy.
+
+The output is `frontend/out/Agent Orchestrator-darwin-arm64/Agent Orchestrator.app`.
+This is a local development artifact, not a notarized or trusted release.
+The version-floor check and updater use the same baked `AO_RELEASE_REPO`;
+a fork never reads the upstream version floor when its own config is absent.
+The local RCP bridge and session MCP both default to credential-free
+`http://127.0.0.1:8090`; daemon configuration may override the bridge, while
+session injection remains restricted to that exact local endpoint.
+
+For a local version stamp, use the same package.json version stamping step as
+`build-artifacts.yml` before packaging, then restore the source version.
+Preserve and compare the installed version; do not disable relocation or
+schema compatibility checks. Never replace a running install or its data as
+part of the build command. The local sealer only accepts its fixed build path.

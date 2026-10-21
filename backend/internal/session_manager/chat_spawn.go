@@ -373,9 +373,13 @@ func (m *Manager) aoMCPServers(harness domain.AgentHarness, env map[string]strin
 	}}
 	// Codex thread/start replaces the top-level MCP map with these explicit
 	// servers. A CLI config override alone therefore cannot attach RCP.
-	// This pilot enables only the operator-configured local, credential-free
-	// endpoint; repository env cannot redirect it or inject credentials.
+	// Match the local read-only RCP bridge default on Finder launches, where
+	// launcher environment is absent. Repository env cannot redirect it or
+	// inject credentials; only the daemon process config is consulted.
 	address := os.Getenv("AO_RCP_URL")
+	if address == "" {
+		address = "http://127.0.0.1:8090"
+	}
 	if address != "" && os.Getenv("AO_RCP_TOKEN") == "" {
 		if _, err := rcpsvc.New(address, ""); err == nil && address == "http://127.0.0.1:8090" {
 			servers = append(servers, ports.ChatMCPServerConfig{Name: "release_control", Type: "http", URL: address + "/mcp"})

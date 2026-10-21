@@ -5,6 +5,7 @@ describe("checkDesktopVersionFloor", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.resetModules();
+    Reflect.deleteProperty(process, "resourcesPath");
   });
 
   async function importModule(options: {
@@ -13,7 +14,14 @@ describe("checkDesktopVersionFloor", () => {
     floor?: { min?: string; latest?: string; downloadUrl?: string };
     fetchError?: boolean;
     fetchStatus?: number;
+    repo?: string;
+    configError?: boolean;
   } = {}) {
+    Object.defineProperty(process, "resourcesPath", { value: "/fixture/resources", configurable: true });
+    vi.doMock("node:fs", () => ({ readFileSync: () => {
+      if (options.configError) throw new Error("missing config");
+      return options.repo ?? "owner: Untrivial-ai\nrepo: agent-orchestrator\n";
+    } }));
     const dialog = { showMessageBox: vi.fn(() => Promise.resolve({ response: 1 })) };
     const shellMock = { openExternal: vi.fn(() => Promise.resolve()) };
     const quit = vi.fn();
@@ -132,4 +140,21 @@ describe("checkDesktopVersionFloor", () => {
     await mod.checkDesktopVersionFloor();
     expect(dialog.showMessageBox).not.toHaveBeenCalled();
   });
+  it("uses the baked fork for floor and download, rejecting an upstream redirect", async () => {
+    const { mod, fetchMock, shellMock, dialog } = await importModule({
+      repo: "owner: example-fork\nrepo: agent-orchestrator\n",
+      floor: { min: "0.14.3", downloadUrl: "https://github.com/Untrivial-ai/agent-orchestrator/releases/latest" },
+    });
+    dialog.showMessageBox.mockResolvedValue({ response: 0 });
+    await mod.checkDesktopVersionFloor();
+    expect(fetchMock).toHaveBeenCalledWith("https://raw.githubusercontent.com/example-fork/agent-orchestrator/main/desktop-version-floor.json", expect.any(Object));
+    expect(shellMock.openExternal).toHaveBeenCalledWith("https://github.com/example-fork/agent-orchestrator/releases/latest");
+  });
+
+  it.each([{ configError: true }, { repo: "owner: ../upstream\nrepo: agent-orchestrator\n" }])("does not query upstream for missing or unsafe identity: %j", async options => {
+    const { mod, fetchMock } = await importModule(options);
+    await mod.checkDesktopVersionFloor();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
 });
