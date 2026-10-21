@@ -14,6 +14,9 @@ func TestRCPMCPDefaultsToLocalAndIsDaemonScoped(t *testing.T) {
 	if got := mgr.aoMCPServers(domain.HarnessCodex, map[string]string{"AO_RCP_URL": "http://evil.example", "AO_RCP_TOKEN": "secret"}); len(got) != 2 || got[1].URL != "http://127.0.0.1:8090/mcp" || len(got[1].Headers) != 0 {
 		t.Fatalf("repository env changed the credential-free local default: %+v", got)
 	}
+	if got := mgr.aoMCPServers(domain.HarnessQwen, nil); len(got) != 1 {
+		t.Fatalf("default HTTP MCP injected into an ACP harness without known capability: %+v", got)
+	}
 	t.Setenv("AO_RCP_URL", "http://127.0.0.1:8090")
 	got := mgr.aoMCPServers(domain.HarnessCodex, nil)
 	if len(got) != 2 || got[1].Name != "release_control" || got[1].URL != "http://127.0.0.1:8090/mcp" || len(got[1].Headers) > 0 {

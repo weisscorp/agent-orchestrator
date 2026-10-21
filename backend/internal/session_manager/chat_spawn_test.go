@@ -1471,6 +1471,7 @@ func TestChatStartsPassTheAOToolServerWithOnlyDaemonCoordinates(t *testing.T) {
 	if mgr.dataDir == "" {
 		t.Fatal("test manager has no data dir")
 	}
+	want = append(want, ports.ChatMCPServerConfig{Name: "release_control", Type: "http", URL: "http://127.0.0.1:8090/mcp"})
 	if len(launcher.started) != 2 || launcher.started[1].ProviderConversationID == "" {
 		t.Fatalf("want a spawn and a resume, got %d starts", len(launcher.started))
 	}

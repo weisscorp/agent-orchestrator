@@ -216,7 +216,9 @@ The version-floor check and updater use the same baked `AO_RELEASE_REPO`;
 a fork never reads the upstream version floor when its own config is absent.
 The local RCP bridge and session MCP both default to credential-free
 `http://127.0.0.1:8090`; daemon configuration may override the bridge, while
-session injection remains restricted to that exact local endpoint.
+session injection remains restricted to that exact local endpoint. Codex gets
+the local default on Finder launches; other harnesses require explicit daemon
+configuration because HTTP MCP support is provider-dependent.
 
 For a local version stamp, use the same package.json version stamping step as
 `build-artifacts.yml` before packaging, then restore the source version.

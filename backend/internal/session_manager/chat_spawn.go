@@ -377,7 +377,7 @@ func (m *Manager) aoMCPServers(harness domain.AgentHarness, env map[string]strin
 	// launcher environment is absent. Repository env cannot redirect it or
 	// inject credentials; only the daemon process config is consulted.
 	address := os.Getenv("AO_RCP_URL")
-	if address == "" {
+	if address == "" && harness == domain.HarnessCodex {
 		address = "http://127.0.0.1:8090"
 	}
 	if address != "" && os.Getenv("AO_RCP_TOKEN") == "" {
